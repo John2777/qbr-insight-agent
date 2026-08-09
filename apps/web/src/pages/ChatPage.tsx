@@ -5,7 +5,7 @@ import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { SlideCanvas } from "../components/SlideCanvas";
 import { AssistantAnswer } from "../components/AssistantAnswer";
 import { MessageCopyButton } from "../components/MessageCopyButton";
-import { notifyConversationHistoryChanged } from "../components/ConversationHistory";
+import { notifyConversationsChanged } from "../conversationEvents";
 import type { Citation, Conversation, DocumentItem, SlideDetail } from "../types";
 
 export function ChatPage() {
@@ -45,7 +45,7 @@ export function ChatPage() {
         if (event.event === "answer_delta") setStreamingAnswer((value) => value + String(event.data.delta ?? ""));
         if (event.event === "warning") setStage(String(event.data.message ?? event.data.code ?? "已降级处理"));
       });
-      setConversation(await api<Conversation>(`/api/v1/conversations/${id}`)); setStreamingAnswer(""); setStage(""); notifyConversationHistoryChanged();
+      setConversation(await api<Conversation>(`/api/v1/conversations/${id}`)); setStreamingAnswer(""); setStage(""); notifyConversationsChanged();
     } catch (err) { setError(err instanceof Error ? err.message : "回答失败"); }
     finally { setSending(false); }
   }

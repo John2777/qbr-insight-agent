@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, api } from "../api";
+import { CONVERSATIONS_CHANGED_EVENT, notifyConversationsChanged } from "../conversationEvents";
 import type { ConversationSummary } from "../types";
-
-const HISTORY_CHANGED_EVENT = "qbr-conversations-changed";
-
-export function notifyConversationHistoryChanged() {
-  window.dispatchEvent(new Event(HISTORY_CHANGED_EVENT));
-}
 
 function formatActivity(value: string): string {
   const date = new Date(value);
@@ -32,10 +27,10 @@ export function ConversationHistory() {
         .finally(() => { if (active) setLoaded(true); });
     };
     load();
-    window.addEventListener(HISTORY_CHANGED_EVENT, load);
+    window.addEventListener(CONVERSATIONS_CHANGED_EVENT, load);
     return () => {
       active = false;
-      window.removeEventListener(HISTORY_CHANGED_EVENT, load);
+      window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, load);
     };
   }, [location.pathname]);
 
@@ -46,6 +41,7 @@ export function ConversationHistory() {
     try {
       await api<void>(`/api/v1/conversations/${item.id}`, { method: "DELETE" });
       setItems((current) => current.filter((conversation) => conversation.id !== item.id));
+      notifyConversationsChanged();
       if (location.pathname === `/chat/${item.id}`) navigate("/chat", { replace: true });
     } catch (error) {
       setDeleteError(error instanceof ApiError && error.status === 409

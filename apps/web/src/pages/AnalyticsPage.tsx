@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { CONVERSATIONS_CHANGED_EVENT } from "../conversationEvents";
 
 type Analytics = {
   documents: Record<string, number>;
@@ -11,7 +12,20 @@ type Analytics = {
 
 export function AnalyticsPage() {
   const [data, setData] = useState<Analytics | null>(null);
-  useEffect(() => { void api<Analytics>("/api/v1/analytics/summary").then(setData); }, []);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      void api<Analytics>("/api/v1/analytics/summary")
+        .then((result) => { if (active) setData(result); })
+        .catch(() => undefined);
+    };
+    load();
+    window.addEventListener(CONVERSATIONS_CHANGED_EVENT, load);
+    return () => {
+      active = false;
+      window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, load);
+    };
+  }, []);
   if (!data) return <div className="loading">正在加载分析指标…</div>;
   const documentTotal = Object.values(data.documents).reduce((sum, value) => sum + value, 0);
   const completionRate = data.runs.total ? Math.round(data.runs.completed / data.runs.total * 100) : 0;

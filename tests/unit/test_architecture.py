@@ -80,10 +80,13 @@ def test_conversation_deletion_is_user_scoped_and_rejects_active_runs(tmp_path: 
 
     with service.db.transaction(immediate=True) as conn:
         conn.execute("UPDATE runs SET status='failed' WHERE id=?", (queued["run_id"],))
+    assert [run["id"] for run in service.analytics_summary("ws_demo")["recent_runs"]] == [queued["run_id"]]
     service.delete_conversation(conversation["id"], "ws_demo", "user_demo")
 
     with pytest.raises(ResourceNotFound):
         service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    assert service.analytics_summary("ws_demo")["recent_runs"] == []
+    assert service.analytics_summary("ws_demo")["runs"]["total"] == 0
     assert service.get_conversation(private["id"], "ws_demo", "another_user")["title"] == "Private"
 
 
