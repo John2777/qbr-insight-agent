@@ -71,7 +71,11 @@ RISK_MARKERS = (
 MANAGEMENT_MARKERS = (
     "priority",
     "action",
+    "control",
     "mitigation",
+    "optimize",
+    "reduce",
+    "remediate",
     "needs improvement",
     "requires",
     "需要",
@@ -80,6 +84,10 @@ MANAGEMENT_MARKERS = (
     "缓释",
     "改善",
     "校准",
+    "修复",
+    "控制",
+    "降低",
+    "优化",
 )
 
 NEGATIVE_PREDICATE_MARKERS = (
@@ -97,10 +105,12 @@ NEGATIVE_PREDICATE_MARKERS = (
     "volatility",
     "warning",
     "承压",
+    "控制",
     "超过",
     "低于",
     "高于",
     "集中在",
+    "集中度",
     "下滑",
     "下降",
     "恶化",
@@ -262,12 +272,12 @@ def infer_facet(content: str, plan: QueryPlan) -> str:
         return plan.required_facets[0] if plan.required_facets else "direct_answer"
     if any(marker in folded for marker in ("threshold", "limit", "warning", "breach", "阈值", "限额", "红色", "黄色", "预警")):
         return "threshold_pressure"
+    if any(marker in folded for marker in MANAGEMENT_MARKERS):
+        return "management_concerns"
     if any(marker in folded for marker in ("concentration", "exposure", "集中", "暴露")):
         return "risk_concentration"
     if any(marker in folded for marker in ("decline", "drop", "below", "deteriorat", "下降", "下滑", "恶化", "低于", "未达", "承压")):
         return "deteriorating_metrics"
-    if any(marker in folded for marker in MANAGEMENT_MARKERS):
-        return "management_concerns"
     if any(marker in folded for marker in RISK_MARKERS):
         return "explicit_negative_statements"
     return ""
@@ -278,10 +288,10 @@ def _is_heading_like_negative(content: str) -> bool:
     folded = compact.casefold()
     if folded.startswith("section "):
         return True
-    latin_letters = re.sub(r"[^A-Za-z]", "", compact)
-    if latin_letters and len(compact) <= 80 and latin_letters.upper() == latin_letters:
-        return True
     has_predicate = any(marker in folded for marker in NEGATIVE_PREDICATE_MARKERS)
+    latin_letters = re.sub(r"[^A-Za-z]", "", compact)
+    if latin_letters and len(compact) <= 80 and latin_letters.upper() == latin_letters and not has_predicate:
+        return True
     token_count = len(re.findall(r"[A-Za-z0-9%]+|[\u4e00-\u9fff]{2,}", compact))
     return len(compact) <= 90 and token_count <= 6 and not has_predicate
 

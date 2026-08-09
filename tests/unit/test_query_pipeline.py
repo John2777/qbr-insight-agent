@@ -8,7 +8,8 @@ from langchain_core.messages import AIMessage
 
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.db import utc_now
-from packages.qbr_core.evidence import EvidencePackBuilder, extract_relevant_quote
+from packages.qbr_core.evidence import EvidencePack, EvidencePackBuilder, extract_relevant_quote
+from packages.qbr_core.negative_analysis import NegativeSignalAnalyzer
 from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
 from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
 
@@ -234,6 +235,15 @@ def test_evidence_pack_filters_provenance_and_preserves_table_rows() -> None:
             "content": "Chart\nRisk capital allocation | Market=28; Credit=22; Insurance=19",
             "retrieval_score": 5,
         },
+        {
+            "id": "management-action",
+            "document_version_id": "dv",
+            "slide_id": "s7",
+            "slide_no": 7,
+            "chunk_type": "text",
+            "content": "强化高净值、保障与跨境服务，控制产品集中度。",
+            "retrieval_score": 4,
+        },
     ]
 
     pack = EvidencePackBuilder().build(plan, candidates)
@@ -244,6 +254,7 @@ def test_evidence_pack_filters_provenance_and_preserves_table_rows() -> None:
     assert "RISK CONCENTRATION" not in quotes
     assert "Capital ratio" not in quotes
     assert "Risk capital allocation" not in quotes
+    assert "控制产品集中度" in quotes
     assert "Metric | Current | Limit" in quotes
     assert "Risk concentration | 48% | 45%" in quotes
     assert "Revenue growth | 15% | 10%" not in quotes
@@ -252,6 +263,136 @@ def test_evidence_pack_filters_provenance_and_preserves_table_rows() -> None:
         "all_green_status_table": 1,
         "uninterpreted_chart": 1,
     }
+
+
+def test_negative_analyzer_derives_trends_and_distinguishes_green_gates() -> None:
+    plan = deterministic_plan("what is the bad news in this ppt")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "financial-table",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s6",
+            "slide_no": 6,
+            "element_id": "e6",
+            "chunk_type": "table",
+            "content": (
+                "核心财务指标 | 2023A | 2024A | 2025A | 同比/变化 | 单位\nShareholder capital ratio | 269% | 236% | 221% | -15ppt | %"
+            ),
+        },
+        {
+            "id": "green-gates",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s7",
+            "slide_no": 7,
+            "element_id": "e7",
+            "chunk_type": "table",
+            "content": ("风险闸门 | 绿 | 黄 | 红 | 当前\nVONB增速 | >12% | 5-12% | <5% | 15%\n资本比率 | >210% | 190-210% | <190% | 221%"),
+        },
+        {
+            "id": "management-action",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s7",
+            "slide_no": 7,
+            "element_id": "e8",
+            "chunk_type": "text",
+            "content": "强化高净值、保障与跨境服务，控制产品集中度。",
+        },
+    ]
+    chart_rows = []
+    for series_id, series_name, previous, current in (
+        ("digital-stp", "Digital STP", 73.8, 72.1),
+        ("persistency", "Persistency", 90.8, 90.1),
+        ("other-markets", "其他市场", 134.0, 129.0),
+    ):
+        for point_order, category, value in ((1, "26/02", previous), (2, "26/03", current)):
+            chart_rows.append(
+                {
+                    "series_id": series_id,
+                    "series_name": series_name,
+                    "point_order": point_order,
+                    "category": category,
+                    "y_value": value,
+                    "display_value": str(value),
+                    "document_version_id": "dv",
+                    "document_id": "doc",
+                    "slide_id": "s3",
+                    "slide_no": 3,
+                    "element_id": "shared-chart-element",
+                    "chart_title": "Monthly KPI trends",
+                }
+            )
+
+    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=chart_rows)
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert assessment.explicit_red_flags is False
+    assert "No red/amber threshold breach" in answer
+    assert "236%" in answer and "221%" in answer and "15 percentage points" in answer
+    assert "Digital STP" in answer and "Persistency" in answer
+    assert "其他市场" not in answer
+    assert "控制产品集中度" in answer
+    assert "enough relevant business evidence" not in answer
+    assert {item["analysis_method"] for item in evidence} == {
+        "structured_table_trend",
+        "structured_chart_trend",
+        "management_action_inference",
+    }
+    assert warnings == []
+
+
+def test_negative_analyzer_reports_no_red_flags_instead_of_insufficient_evidence() -> None:
+    plan = deterministic_plan("what is the bad news in this ppt")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "green-gates",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s1",
+            "slide_no": 1,
+            "element_id": "e1",
+            "chunk_type": "table",
+            "content": "Risk gate | Green | Amber | Red | Current\nCapital ratio | >210% | 190-210% | <190% | 221%",
+        }
+    ]
+
+    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert answer.startswith("No explicit negative result or breached threshold")
+    assert "misleading to manufacture bad news" in answer
+    assert len(evidence) == 1
+    assert warnings == []
+
+
+def test_negative_analyzer_distinguishes_no_adverse_signal_from_no_business_content() -> None:
+    plan = deterministic_plan("what is the bad news in this ppt")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "positive-business-content",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s1",
+            "slide_no": 1,
+            "element_id": "e1",
+            "chunk_type": "text",
+            "content": "Revenue growth remained above target and the capital ratio stayed within the green range.",
+        }
+    ]
+
+    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert answer.startswith("No explicit negative statement")
+    assert "does not support a specific bad-news claim" in answer
+    assert "enough relevant business evidence" not in answer
+    assert evidence == []
+    assert warnings == []
 
 
 def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_path: Path) -> None:
@@ -274,6 +415,7 @@ def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_p
     assert "ImageGen" not in message["content"]
     assert message["metadata"]["query_plan"]["intent"] == "negative_signal_summary"
     assert message["metadata"]["pipeline_version"] == "planned-evidence-v1"
+    assert message["metadata"]["negative_assessment"]["signal_count"] == 2
     assert {citation["slide_no"] for citation in message["citations"]} == {1, 2}
 
 

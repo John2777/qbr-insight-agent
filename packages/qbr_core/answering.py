@@ -7,6 +7,7 @@ from typing import Any
 
 from .db import Database
 from .evidence import EvidencePackBuilder
+from .negative_analysis import NegativeSignalAnalyzer
 from .query_planning import QueryPlan, RetrievalQuery, deterministic_plan
 from .retrieval import EvidenceRetriever
 from .skill_registry import SkillDescriptor, SkillRegistry
@@ -119,6 +120,7 @@ class DeterministicAnswerEngine:
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
         self.evidence_builder = EvidencePackBuilder()
+        self.negative_analyzer = NegativeSignalAnalyzer()
 
     def _scope_clause(self, document_ids: list[str]) -> tuple[str, list[Any]]:
         if not document_ids:
@@ -280,6 +282,16 @@ class DeterministicAnswerEngine:
                 if (len(retry_pack.covered_facets), len(retry_pack.atoms)) > (len(pack.covered_facets), len(pack.atoms)):
                     pack = retry_pack
                     diagnostics["evidence_pack"] = pack.to_dict()
+            if plan.intent == "negative_signal_summary":
+                assessment = self.negative_analyzer.analyze(
+                    plan,
+                    explicit_pack=pack,
+                    chunks=scoped_chunks,
+                    chart_rows=chart_data,
+                )
+                diagnostics["negative_assessment"] = assessment.diagnostics
+                answer, evidence, assessment_warnings = assessment.render(plan)
+                return answer, evidence, list(dict.fromkeys([*plan.warnings, *assessment_warnings]))
             warnings = list(plan.warnings)
             if not pack.answerable:
                 warnings.append("INSUFFICIENT_EVIDENCE")

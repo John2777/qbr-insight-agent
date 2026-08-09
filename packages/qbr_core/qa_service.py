@@ -379,6 +379,7 @@ class QAApplicationService:
                 "query_plan": plan.to_dict(),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
+                "negative_assessment": answer_result.diagnostics.get("negative_assessment", {}),
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
         except Exception as exc:

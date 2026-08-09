@@ -286,11 +286,16 @@ def _deterministic_queries(question: str, intent: str) -> tuple[RetrievalQuery, 
         queries.extend(
             (
                 RetrievalQuery(
-                    "", "risk concentration deteriorating trend underperformance below target pressure", "business_semantic", 1.15
+                    "",
+                    "risk concentration deteriorating trend decline slowdown compression underperformance below target adverse variance",
+                    "business_semantic",
+                    1.15,
                 ),
                 RetrievalQuery("", "warning threshold breach red amber risk limit utilization", "threshold", 1.05),
-                RetrievalQuery("", "风险 承压 下滑 恶化 未达目标 集中度 波动 挑战 预警", "cross_language", 1.15),
+                RetrievalQuery("", "风险 承压 下滑 下降 回落 放缓 恶化 未达目标 偏差 集中度 波动 挑战 预警", "cross_language", 1.15),
                 RetrievalQuery("", "management concern mitigation action priority needs improvement", "management_signal", 0.95),
+                RetrievalQuery("", "修复 降低 控制 优化 集中度 资本强度 渠道组合 产品节奏", "management_cross_language", 1.05),
+                RetrievalQuery("", "year over year quarter over quarter change negative variance 同比 环比 变化", "trend_discovery", 0.9),
             )
         )
     elif intent == "summary":
