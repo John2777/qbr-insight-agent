@@ -61,23 +61,29 @@ def _message_text(message: AIMessage) -> str:
     return "".join(parts).strip()
 
 
+def build_chat_model(settings: Settings, model_name: str) -> ChatOpenAI:
+    """Build an OpenAI-compatible client for one role in the agent pipeline."""
+    return ChatOpenAI(
+        model=model_name,
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        temperature=settings.llm_temperature,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+        max_completion_tokens=settings.llm_max_tokens,
+        use_responses_api=False,
+    )
+
+
 class EvidenceQAAgent:
     """LangGraph orchestration around an OpenAI-compatible LangChain chat model."""
 
-    def __init__(self, settings: Settings, model: Any | None = None) -> None:
+    def __init__(self, settings: Settings, model: Any | None = None, *, model_name: str | None = None) -> None:
         if not settings.llm_configured and model is None:
             raise ValueError("LLM settings are incomplete")
         self.settings = settings
-        self.model = model or ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-            max_retries=settings.llm_max_retries,
-            max_completion_tokens=settings.llm_max_tokens,
-            use_responses_api=False,
-        )
+        self.model_name = model_name or settings.llm_model
+        self.model = model or build_chat_model(settings, self.model_name)
         graph = StateGraph(QAState)
         graph.add_node("generate", self._generate)
         graph.add_node("verify", self._verify)
@@ -144,7 +150,7 @@ class EvidenceQAAgent:
                 "warnings": ["LLM_PROVIDER_ERROR"],
                 "model": {
                     "provider": self.settings.llm_provider,
-                    "model": self.settings.llm_model,
+                    "model": self.model_name,
                     "status": "fallback",
                     "error_type": type(exc).__name__,
                     "latency_ms": round((time.perf_counter() - started) * 1000),
@@ -156,7 +162,7 @@ class EvidenceQAAgent:
             "candidate_answer": _message_text(message),
             "model": {
                 "provider": self.settings.llm_provider,
-                "model": response_metadata.get("model_name") or self.settings.llm_model,
+                "model": response_metadata.get("model_name") or self.model_name,
                 "status": "completed",
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "input_tokens": usage.get("input_tokens"),

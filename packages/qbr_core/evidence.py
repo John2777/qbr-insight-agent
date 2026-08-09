@@ -175,6 +175,23 @@ def classify_content_role(row: dict[str, Any]) -> str:
     return "business_fact"
 
 
+def _requires_authoritative_numeric_source(question: str) -> bool:
+    folded = question.casefold()
+    markers = (
+        "多少",
+        "数值",
+        "金额",
+        "百分比",
+        "准确",
+        "exact",
+        "value",
+        "amount",
+        "percentage",
+        "percent",
+    )
+    return any(marker in folded for marker in markers)
+
+
 def _loads(value: str | None, default: Any) -> Any:
     if not value:
         return default
@@ -441,6 +458,13 @@ class EvidencePackBuilder:
                 rejected_roles[role] = rejected_roles.get(role, 0) + 1
                 continue
             content = str(row.get("content") or "").strip()
+            if (
+                str(row.get("source_kind") or "") == "visual_model"
+                and _requires_authoritative_numeric_source(plan.original_question)
+                and re.search(r"\d", content)
+            ):
+                rejected_quality["visual_numeric"] = rejected_quality.get("visual_numeric", 0) + 1
+                continue
             if plan.intent == "negative_signal_summary":
                 if _is_heading_like_negative(content):
                     rejected_quality["heading_like"] = rejected_quality.get("heading_like", 0) + 1

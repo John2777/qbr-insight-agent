@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingProvider(Protocol):
     model: str
+    identity: str
 
     @property
     def dimensions(self) -> int: ...
@@ -52,6 +53,15 @@ class OpenAICompatibleEmbeddingProvider:
     def __init__(self, settings: Settings) -> None:
         self.model = settings.embedding_model
         self._dimensions = settings.embedding_dimensions
+        identity_payload = {
+            "provider": settings.embedding_provider,
+            "base_url": settings.embedding_base_url.rstrip("/"),
+            "model": settings.embedding_model,
+            "configured_dimensions": settings.embedding_dimensions,
+        }
+        self.identity = hashlib.sha256(
+            json.dumps(identity_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         self._client = OpenAI(
             api_key=settings.embedding_api_key,
             base_url=settings.embedding_base_url,
@@ -91,10 +101,10 @@ class HashingEmbeddingProvider:
     intentionally not advertised as a semantic model for production use.
     """
 
-    model = "hashing-v1"
-
     def __init__(self, dimensions: int = 384) -> None:
         self._dimensions = dimensions or 384
+        self.model = "hashing-v1"
+        self.identity = f"hashing-v1:{self._dimensions}"
 
     @property
     def dimensions(self) -> int:
@@ -183,10 +193,17 @@ class FaissVectorStore:
                 LEFT JOIN chunk_embeddings ce ON ce.chunk_id=ch.id
                 WHERE ch.workspace_id=? AND ch.active=1 AND d.deleted_at IS NULL
                   AND s.parser_run_id=dv.active_parser_run_id
-                  AND (ce.id IS NULL OR ce.model<>? OR ce.content_hash<>ch.content_hash)
+                  AND (ce.id IS NULL OR ce.model<>? OR ce.embedding_identity<>?
+                       OR ce.content_hash<>ch.content_hash OR (? > 0 AND ce.dimensions<>?))
                 ORDER BY ch.id
                 """,
-                (workspace_id, self.provider.model),
+                (
+                    workspace_id,
+                    self.provider.model,
+                    self.provider.identity,
+                    self.provider.dimensions,
+                    self.provider.dimensions,
+                ),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -213,15 +230,16 @@ class FaissVectorStore:
                         conn.execute(
                             """
                             INSERT INTO chunk_embeddings(
-                              chunk_id,workspace_id,model,dimensions,vector,content_hash,created_at
-                            ) VALUES (?,?,?,?,?,?,?)
+                              chunk_id,workspace_id,model,embedding_identity,dimensions,vector,content_hash,created_at
+                            ) VALUES (?,?,?,?,?,?,?,?)
                             ON CONFLICT(chunk_id) DO UPDATE SET
                               workspace_id=excluded.workspace_id,model=excluded.model,
+                              embedding_identity=excluded.embedding_identity,
                               dimensions=excluded.dimensions,vector=excluded.vector,
                               content_hash=excluded.content_hash,created_at=excluded.created_at
                             """,
                             (
-                                item["id"], workspace_id, self.provider.model, dimensions,
+                                item["id"], workspace_id, self.provider.model, self.provider.identity, dimensions,
                                 blob, item["content_hash"], utc_now(),
                             ),
                         )
@@ -237,11 +255,11 @@ class FaissVectorStore:
                 JOIN slides s ON s.id=ch.slide_id
                 JOIN document_versions dv ON dv.id=ch.document_version_id
                 JOIN documents d ON d.id=dv.document_id
-                WHERE ce.workspace_id=? AND ce.model=? AND ch.active=1
+                WHERE ce.workspace_id=? AND ce.model=? AND ce.embedding_identity=? AND ch.active=1
                   AND d.deleted_at IS NULL AND s.parser_run_id=dv.active_parser_run_id
                 ORDER BY ce.id
                 """,
-                (workspace_id, self.provider.model),
+                (workspace_id, self.provider.model, self.provider.identity),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -264,6 +282,7 @@ class FaissVectorStore:
         rows = self._embedding_rows(workspace_id)
         return (
             manifest.get("model") == self.provider.model
+            and manifest.get("embedding_identity") == self.provider.identity
             and manifest.get("count") == len(rows)
             and manifest.get("signature") == self._signature(rows)
         )
@@ -295,6 +314,7 @@ class FaissVectorStore:
             manifest = {
                 "workspace_id": workspace_id,
                 "model": self.provider.model,
+                "embedding_identity": self.provider.identity,
                 "dimensions": dimension,
                 "count": len(rows),
                 "signature": self._signature(rows),
@@ -362,7 +382,8 @@ class FaissVectorStore:
             with self.db.read() as conn:
                 rows = conn.execute(
                     f"""
-                    SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
+                    SELECT ch.*,s.slide_no,e.bbox_json,e.confidence element_confidence,
+                      d.title document_title,d.id document_id,
                       ce.id embedding_id
                     FROM chunk_embeddings ce JOIN chunks ch ON ch.id=ce.chunk_id
                     JOIN slides s ON s.id=ch.slide_id
@@ -370,12 +391,23 @@ class FaissVectorStore:
                     JOIN documents d ON d.id=dv.document_id
                     LEFT JOIN elements e ON e.id=ch.element_id
                     WHERE ce.id IN ({placeholders}) AND ce.workspace_id=? AND ce.model=?
+                      AND ce.embedding_identity=?
                       AND ch.workspace_id=? AND ch.active=1 AND d.deleted_at IS NULL
                       AND s.parser_run_id=dv.active_parser_run_id {document_scope}
                     """,
-                    (*ids, workspace_id, self.provider.model, workspace_id, *scope_args),
+                    (*ids, workspace_id, self.provider.model, self.provider.identity, workspace_id, *scope_args),
                 ).fetchall()
-            by_id = {int(row["embedding_id"]): dict(row) for row in rows}
+            by_id: dict[int, dict[str, Any]] = {}
+            for row in rows:
+                item = dict(row)
+                try:
+                    metadata = json.loads(str(item.get("metadata_json") or "{}"))
+                except json.JSONDecodeError:
+                    metadata = {}
+                if isinstance(metadata, dict):
+                    item["source_kind"] = metadata.get("source_kind") or "native_ooxml"
+                    item["confidence"] = metadata.get("confidence", item.get("element_confidence") or 1.0)
+                by_id[int(item["embedding_id"])] = item
             results: list[dict[str, Any]] = []
             for identifier, score in scored_ids:
                 row = by_id.get(identifier)

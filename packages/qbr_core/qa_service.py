@@ -37,6 +37,7 @@ class QAApplicationService:
         db: Database,
         retriever: EvidenceRetriever,
         qa_agent: EvidenceQAAgent | None,
+        deep_qa_agent: EvidenceQAAgent | None = None,
         skill_registry: SkillRegistry,
         table_reasoning_skill: SkillDescriptor,
         leases: LeaseCoordinator,
@@ -46,6 +47,7 @@ class QAApplicationService:
         self.db = db
         self.retriever = retriever
         self.qa_agent = qa_agent
+        self.deep_qa_agent = deep_qa_agent or qa_agent
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
         self.leases = leases
@@ -351,10 +353,11 @@ class QAApplicationService:
                 "answer_mode": answer_mode,
                 "planner": plan.planner,
             }
-            if self.qa_agent and evidence and answer_mode != "term_definition":
+            selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
+            if selected_agent and evidence and answer_mode != "term_definition":
                 with self.db.transaction(immediate=True) as conn:
                     self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
-                generated = self.qa_agent.answer(
+                generated = selected_agent.answer(
                     question=question,
                     deterministic_answer=answer,
                     evidence=evidence,

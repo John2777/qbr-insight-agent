@@ -11,7 +11,7 @@ from typing import Any
 
 from .ids import new_id
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def utc_now() -> str:
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS chunk_embeddings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   chunk_id TEXT NOT NULL UNIQUE REFERENCES chunks(id) ON DELETE CASCADE,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-  model TEXT NOT NULL, dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
+  model TEXT NOT NULL, embedding_identity TEXT NOT NULL, dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
   content_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_workspace
@@ -261,7 +261,8 @@ class Database:
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  chunk_id TEXT NOT NULL UNIQUE REFERENCES chunks(id) ON DELETE CASCADE,
                  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-                 model TEXT NOT NULL, dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
+                 model TEXT NOT NULL, embedding_identity TEXT NOT NULL DEFAULT '',
+                 dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
                  content_hash TEXT NOT NULL, created_at TEXT NOT NULL
                )"""
         )
@@ -269,6 +270,9 @@ class Database:
             """CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_workspace
                ON chunk_embeddings(workspace_id, model, dimensions)"""
         )
+        embedding_columns = {row[1] for row in conn.execute("PRAGMA table_info(chunk_embeddings)").fetchall()}
+        if "embedding_identity" not in embedding_columns:
+            conn.execute("ALTER TABLE chunk_embeddings ADD COLUMN embedding_identity TEXT NOT NULL DEFAULT ''")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS document_purges (
                  workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, requested_by TEXT NOT NULL,

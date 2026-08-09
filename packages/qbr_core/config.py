@@ -36,6 +36,8 @@ class Settings:
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = field(default="", repr=False)
     llm_model: str = ""
+    planner_model: str = ""
+    deep_llm_model: str = ""
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2
     llm_max_tokens: int = 1200
@@ -46,7 +48,7 @@ class Settings:
     embedding_api_key: str = field(default="", repr=False)
     embedding_model: str = ""
     embedding_dimensions: int = 0
-    embedding_batch_size: int = 32
+    embedding_batch_size: int = 10
     vector_index_dir: Path | None = None
     vector_min_similarity: float = 0.30
     vector_candidate_k: int = 24
@@ -54,6 +56,19 @@ class Settings:
     retrieval_rrf_k: int = 60
     retrieval_lexical_weight: float = 1.25
     retrieval_vector_weight: float = 1.0
+    rerank_enabled: bool = False
+    rerank_base_url: str = ""
+    rerank_api_key: str = field(default="", repr=False)
+    rerank_model: str = "qwen3-rerank"
+    rerank_candidate_k: int = 30
+    rerank_top_n: int = 12
+    vision_enabled: bool = False
+    vision_base_url: str = ""
+    vision_api_key: str = field(default="", repr=False)
+    vision_model: str = "qwen3.7-plus"
+    vision_max_tokens: int = 1200
+    vision_max_slides: int = 50
+    vision_enrich_all_slides: bool = False
     app_env: str = "local"
     auth_mode: str = "demo"
     jwt_secret: str = field(default="", repr=False)
@@ -86,10 +101,13 @@ class Settings:
             if item.strip()
         )
         llm_api_key = os.getenv("LLM_API_KEY", "").strip()
+        llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
         embedding_api_key = os.getenv("EMBEDDING_API_KEY", llm_api_key).strip()
         embedding_base_url = os.getenv(
-            "EMBEDDING_BASE_URL", os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+            "EMBEDDING_BASE_URL", llm_base_url
         ).strip().rstrip("/")
+        rerank_api_key = os.getenv("RERANK_API_KEY", llm_api_key).strip()
+        vision_api_key = os.getenv("VISION_API_KEY", llm_api_key).strip()
         project_skill_root = Path(__file__).resolve().parents[2] / "skills"
         settings = cls(
             data_dir=data_dir,
@@ -102,9 +120,11 @@ class Settings:
             cors_origins=origins,
             llm_enabled=_bool_env("LLM_ENABLED", bool(llm_api_key)),
             llm_provider=os.getenv("LLM_PROVIDER", "openai-compatible").strip(),
-            llm_base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/"),
+            llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=os.getenv("LLM_MODEL", "").strip(),
+            planner_model=os.getenv("PLANNER_MODEL", "").strip(),
+            deep_llm_model=os.getenv("DEEP_LLM_MODEL", "").strip(),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
             llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "2")),
             llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1200")),
@@ -115,7 +135,7 @@ class Settings:
             embedding_api_key=embedding_api_key,
             embedding_model=os.getenv("EMBEDDING_MODEL", "").strip(),
             embedding_dimensions=int(os.getenv("EMBEDDING_DIMENSIONS", "0")),
-            embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "32")),
+            embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "10")),
             vector_index_dir=Path(os.getenv("VECTOR_INDEX_DIR", str(data_dir / "vector_indexes"))).resolve(),
             vector_min_similarity=float(os.getenv("VECTOR_MIN_SIMILARITY", "0.30")),
             vector_candidate_k=int(os.getenv("VECTOR_CANDIDATE_K", "24")),
@@ -123,6 +143,19 @@ class Settings:
             retrieval_rrf_k=int(os.getenv("RETRIEVAL_RRF_K", "60")),
             retrieval_lexical_weight=float(os.getenv("RETRIEVAL_LEXICAL_WEIGHT", "1.25")),
             retrieval_vector_weight=float(os.getenv("RETRIEVAL_VECTOR_WEIGHT", "1.0")),
+            rerank_enabled=_bool_env("RERANK_ENABLED", False),
+            rerank_base_url=os.getenv("RERANK_BASE_URL", "").strip().rstrip("/"),
+            rerank_api_key=rerank_api_key,
+            rerank_model=os.getenv("RERANK_MODEL", "qwen3-rerank").strip(),
+            rerank_candidate_k=int(os.getenv("RERANK_CANDIDATE_K", "30")),
+            rerank_top_n=int(os.getenv("RERANK_TOP_N", "12")),
+            vision_enabled=_bool_env("VISION_ENABLED", False),
+            vision_base_url=os.getenv("VISION_BASE_URL", llm_base_url).strip().rstrip("/"),
+            vision_api_key=vision_api_key,
+            vision_model=os.getenv("VISION_MODEL", "qwen3.7-plus").strip(),
+            vision_max_tokens=int(os.getenv("VISION_MAX_TOKENS", "1200")),
+            vision_max_slides=int(os.getenv("VISION_MAX_SLIDES", "50")),
+            vision_enrich_all_slides=_bool_env("VISION_ENRICH_ALL_SLIDES", False),
             app_env=os.getenv("APP_ENV", "local").strip().lower(),
             auth_mode=os.getenv("AUTH_MODE", "demo").strip().lower(),
             jwt_secret=os.getenv("JWT_SECRET", "").strip(),
@@ -159,6 +192,12 @@ class Settings:
             raise ValueError("Retrieval candidate sizes and RRF constant must be positive")
         if self.retrieval_lexical_weight <= 0 or self.retrieval_vector_weight <= 0:
             raise ValueError("Retrieval fusion weights must be positive")
+        if self.rerank_candidate_k < 1 or self.rerank_top_n < 1:
+            raise ValueError("Rerank candidate sizes must be positive")
+        if self.rerank_top_n > self.rerank_candidate_k:
+            raise ValueError("RERANK_TOP_N must not exceed RERANK_CANDIDATE_K")
+        if self.vision_max_tokens < 1 or self.vision_max_slides < 1:
+            raise ValueError("Vision token and slide limits must be positive")
         if self.auth_mode not in {"demo", "jwt", "password"}:
             raise ValueError("AUTH_MODE must be demo, jwt, or password")
         if self.app_env in {"production", "prod"} and self.auth_mode == "demo":
@@ -190,6 +229,14 @@ class Settings:
         if self.embedding_provider == "hashing":
             return True
         return bool(self.embedding_api_key and self.embedding_model and self.embedding_base_url)
+
+    @property
+    def rerank_configured(self) -> bool:
+        return self.rerank_enabled and bool(self.rerank_api_key and self.rerank_model and self.rerank_base_url)
+
+    @property
+    def vision_configured(self) -> bool:
+        return self.vision_enabled and bool(self.vision_api_key and self.vision_model and self.vision_base_url)
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

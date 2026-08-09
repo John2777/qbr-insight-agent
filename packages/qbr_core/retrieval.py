@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from .db import Database
 from .evidence import classify_content_role
+from .rerank import Reranker
 from .vector import VectorSearchBackend
 
 if TYPE_CHECKING:
@@ -91,6 +93,9 @@ class EvidenceRetriever:
         rrf_k: int = 60,
         lexical_weight: float = 1.25,
         vector_weight: float = 1.0,
+        reranker: Reranker | None = None,
+        rerank_candidate_k: int = 30,
+        rerank_top_n: int = 12,
     ) -> None:
         self.db = db
         self.mode = mode
@@ -100,6 +105,9 @@ class EvidenceRetriever:
         self.rrf_k = rrf_k
         self.lexical_weight = lexical_weight
         self.vector_weight = vector_weight
+        self.reranker = reranker
+        self.rerank_candidate_k = rerank_candidate_k
+        self.rerank_top_n = rerank_top_n
 
     @property
     def vector_available(self) -> bool:
@@ -109,6 +117,10 @@ class EvidenceRetriever:
     def vector_backend(self) -> str | None:
         return self.vector_store.backend_name if self.vector_store else None
 
+    @property
+    def rerank_available(self) -> bool:
+        return self.reranker is not None
+
     def index_document_version(self, workspace_id: str, document_version_id: str) -> None:
         if self.vector_store is not None:
             self.vector_store.index_document_version(workspace_id, document_version_id)
@@ -116,6 +128,17 @@ class EvidenceRetriever:
     def rebuild_workspace(self, workspace_id: str) -> None:
         if self.vector_store is not None:
             self.vector_store.rebuild_workspace(workspace_id)
+
+    @staticmethod
+    def _hydrate_source_metadata(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            metadata = json.loads(str(row.get("metadata_json") or "{}"))
+        except json.JSONDecodeError:
+            metadata = {}
+        if isinstance(metadata, dict):
+            row["source_kind"] = metadata.get("source_kind") or row.get("source_kind") or "native_ooxml"
+            row["confidence"] = metadata.get("confidence", row.get("element_confidence") or 1.0)
+        return row
 
     def search(
         self,
@@ -125,6 +148,7 @@ class EvidenceRetriever:
         *,
         top_k: int = 5,
         strategy: str | None = None,
+        _apply_rerank: bool = True,
     ) -> RetrievalResult:
         selected_strategy = strategy or self.mode
         if selected_strategy not in {"fts", "vector", "hybrid"}:
@@ -136,8 +160,9 @@ class EvidenceRetriever:
             limit=max(top_k, self.lexical_candidate_k),
         )
         if selected_strategy == "fts":
+            rows, diagnostics = self._semantic_rerank(question, lexical_rows, top_k, enabled=_apply_rerank)
             return RetrievalResult(
-                self._select_diverse(lexical_rows, top_k, len(document_ids), question), lexical_strategy, query
+                self._select_diverse(rows, top_k, len(document_ids), question), lexical_strategy, query, diagnostics
             )
 
         vector_rows: list[dict[str, Any]] = []
@@ -167,23 +192,27 @@ class EvidenceRetriever:
         if selected_strategy == "vector" and vector_rows:
             for row in vector_rows:
                 row["retrieval_score"] = round(float(row.get("vector_score") or 0.0), 6)
+            rows, diagnostics = self._semantic_rerank(question, vector_rows, top_k, diagnostics, enabled=_apply_rerank)
             return RetrievalResult(
-                self._select_diverse(vector_rows, top_k, len(document_ids), question),
+                self._select_diverse(rows, top_k, len(document_ids), question),
                 f"vector:{self.vector_backend}", query, diagnostics,
             )
         if not vector_rows:
             fallback = f"{lexical_strategy}+vector_fallback"
+            rows, diagnostics = self._semantic_rerank(question, lexical_rows, top_k, diagnostics, enabled=_apply_rerank)
             return RetrievalResult(
-                self._select_diverse(lexical_rows, top_k, len(document_ids), question), fallback, query, diagnostics
+                self._select_diverse(rows, top_k, len(document_ids), question), fallback, query, diagnostics
             )
         if not lexical_rows:
             for row in vector_rows:
                 row["retrieval_score"] = round(float(row.get("vector_score") or 0.0), 6)
+            rows, diagnostics = self._semantic_rerank(question, vector_rows, top_k, diagnostics, enabled=_apply_rerank)
             return RetrievalResult(
-                self._select_diverse(vector_rows, top_k, len(document_ids), question),
+                self._select_diverse(rows, top_k, len(document_ids), question),
                 f"vector:{self.vector_backend}+lexical_empty", query, diagnostics,
             )
         fused = self._reciprocal_rank_fusion(lexical_rows, vector_rows, max(top_k, self.lexical_candidate_k))
+        fused, diagnostics = self._semantic_rerank(question, fused, top_k, diagnostics, enabled=_apply_rerank)
         return RetrievalResult(
             self._select_diverse(fused, top_k, len(document_ids), question),
             f"hybrid_rrf:{lexical_strategy}+{self.vector_backend}",
@@ -213,6 +242,7 @@ class EvidenceRetriever:
                 document_ids,
                 top_k=candidate_k,
                 strategy=strategy,
+                _apply_rerank=False,
             )
             query_diagnostics.append(
                 {
@@ -251,7 +281,8 @@ class EvidenceRetriever:
                 str(item.get("id") or ""),
             )
         )
-        selected = self._select_diverse(ranked, top_k, len(document_ids), plan.original_question)
+        reranked, rerank_diagnostics = self._semantic_rerank(plan.original_question, ranked, top_k)
+        selected = self._select_diverse(reranked, top_k, len(document_ids), plan.original_question)
         return RetrievalResult(
             selected,
             f"multi_query:{strategy or self.mode}",
@@ -263,8 +294,53 @@ class EvidenceRetriever:
                 "eligible_candidates": len(ranked),
                 "rejected_roles": rejected_roles,
                 "queries": query_diagnostics,
+                **rerank_diagnostics,
             },
         )
+
+    def _semantic_rerank(
+        self,
+        question: str,
+        rows: list[dict[str, Any]],
+        top_k: int,
+        diagnostics: dict[str, Any] | None = None,
+        *,
+        enabled: bool = True,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        details = dict(diagnostics or {})
+        details["rerank_model"] = self.reranker.model if self.reranker else None
+        if not enabled or self.reranker is None or len(rows) < 2:
+            details["rerank_status"] = "disabled" if self.reranker is None else "skipped"
+            return rows, details
+        candidates = [dict(row) for row in rows[: self.rerank_candidate_k]]
+        try:
+            scores = self.reranker.rerank(
+                question,
+                [str(row.get("content") or "") for row in candidates],
+                top_n=min(max(top_k, self.rerank_top_n), len(candidates)),
+            )
+        except Exception as exc:  # semantic rerank must never take down evidence retrieval
+            logger.warning("Semantic rerank failed; keeping deterministic retrieval order", exc_info=True)
+            details.update({"rerank_status": "fallback", "rerank_error": type(exc).__name__})
+            return rows, details
+        ranked: list[dict[str, Any]] = []
+        used: set[int] = set()
+        for score in sorted(scores, key=lambda item: (-item.relevance_score, item.index)):
+            row = candidates[score.index]
+            row["rerank_score"] = round(score.relevance_score, 8)
+            row["pre_rerank_score"] = row.get("retrieval_score")
+            ranked.append(row)
+            used.add(score.index)
+        ranked.extend(row for index, row in enumerate(candidates) if index not in used)
+        ranked.extend(dict(row) for row in rows[len(candidates) :])
+        details.update(
+            {
+                "rerank_status": "completed",
+                "rerank_candidates": len(candidates),
+                "rerank_results": len(scores),
+            }
+        )
+        return ranked, details
 
     @staticmethod
     def _task_compatibility(intent: str, role: str, content: str) -> float:
@@ -393,7 +469,7 @@ class EvidenceRetriever:
                 fetched = conn.execute(
                     f"""
                     SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
-                      bm25(chunk_fts) AS lexical_rank
+                      e.confidence element_confidence,bm25(chunk_fts) AS lexical_rank
                     FROM chunk_fts JOIN chunks ch ON ch.id=chunk_fts.chunk_id
                     JOIN slides s ON s.id=ch.slide_id
                     JOIN document_versions dv ON dv.id=ch.document_version_id
@@ -406,7 +482,7 @@ class EvidenceRetriever:
                     """,
                     (query, workspace_id, workspace_id, *scope_args, max(limit, 12)),
                 ).fetchall()
-            rows = [dict(row) for row in fetched]
+            rows = [self._hydrate_source_metadata(dict(row)) for row in fetched]
         if not terms:
             return rows, "fts5_bm25" if rows else "none", query
         clauses = " OR ".join("lower(ch.content) LIKE ?" for _ in terms)
@@ -414,7 +490,7 @@ class EvidenceRetriever:
             fetched = conn.execute(
                 f"""
                 SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
-                  100.0 AS lexical_rank
+                  e.confidence element_confidence,100.0 AS lexical_rank
                 FROM chunks ch JOIN slides s ON s.id=ch.slide_id
                 JOIN document_versions dv ON dv.id=ch.document_version_id
                 JOIN documents d ON d.id=dv.document_id
@@ -427,7 +503,7 @@ class EvidenceRetriever:
             ).fetchall()
         merged = {str(row["id"]): row for row in rows}
         for row in fetched:
-            item = dict(row)
+            item = self._hydrate_source_metadata(dict(row))
             merged.setdefault(str(item["id"]), item)
         strategy = "fts5_bm25+substring+lexical_rerank" if rows else "substring+lexical_rerank"
         return self._rerank(list(merged.values()), terms, limit), strategy, query

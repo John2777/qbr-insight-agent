@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import statistics
 import tempfile
@@ -102,6 +103,10 @@ def create_service(
     embedding_provider: str = "hashing",
     embedding_model: str = "hashing-v1",
     embedding_dimensions: int = 384,
+    rerank_enabled: bool = False,
+    rerank_base_url: str = "",
+    rerank_api_key: str = "",
+    rerank_model: str = "qwen3-rerank",
 ) -> QBRService:
     return QBRService(
         Settings(
@@ -115,6 +120,10 @@ def create_service(
             embedding_model=embedding_model,
             embedding_dimensions=embedding_dimensions,
             vector_index_dir=runtime / "vector_indexes",
+            rerank_enabled=rerank_enabled,
+            rerank_base_url=rerank_base_url,
+            rerank_api_key=rerank_api_key,
+            rerank_model=rerank_model,
         )
     )
 
@@ -389,12 +398,18 @@ def main() -> None:
     )
     parser.add_argument("--embedding-model", default="hashing-v1")
     parser.add_argument("--embedding-dimensions", type=int, default=384)
+    parser.add_argument("--rerank", action="store_true", help="Enable the configured semantic reranker after fusion")
+    parser.add_argument("--rerank-base-url", default=os.getenv("RERANK_BASE_URL", ""))
+    parser.add_argument("--rerank-model", default=os.getenv("RERANK_MODEL", "qwen3-rerank"))
     arguments = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
     dataset = json.loads((project_root / arguments.cases).read_text(encoding="utf-8"))
     defaults = dict(dataset.get("case_defaults") or {})
     dataset["cases"] = [{**defaults, **case} for case in dataset["cases"]]
+    rerank_api_key = os.getenv("RERANK_API_KEY", os.getenv("EMBEDDING_API_KEY", os.getenv("LLM_API_KEY", "")))
+    if arguments.rerank and (not arguments.rerank_base_url or not rerank_api_key):
+        parser.error("--rerank requires RERANK_BASE_URL and RERANK_API_KEY (or an embedding/LLM key fallback)")
     with tempfile.TemporaryDirectory(prefix="qbr-30-") as directory:
         service = create_service(
             Path(directory),
@@ -402,6 +417,10 @@ def main() -> None:
             embedding_provider=arguments.embedding_provider,
             embedding_model=arguments.embedding_model,
             embedding_dimensions=arguments.embedding_dimensions,
+            rerank_enabled=arguments.rerank,
+            rerank_base_url=arguments.rerank_base_url,
+            rerank_api_key=rerank_api_key,
+            rerank_model=arguments.rerank_model,
         )
         document_ids = ingest_decks(service, project_root, dataset)
         results = [evaluate_case(service, case, document_ids) for case in dataset["cases"]]
@@ -412,6 +431,7 @@ def main() -> None:
         "generated_at": datetime.now(UTC).isoformat(),
         "answer_mode": "deterministic_local_no_llm",
         "retrieval_strategy": arguments.retrieval_strategy,
+        "rerank": {"enabled": arguments.rerank, "model": arguments.rerank_model if arguments.rerank else None},
         "weights": DIMENSION_WEIGHTS,
         "summary": aggregate(results),
         "results": results,

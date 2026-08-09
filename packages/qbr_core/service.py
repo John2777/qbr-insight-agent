@@ -17,11 +17,12 @@ from .errors import Conflict, InvalidState, ResourceNotFound
 from .evidence import classify_content_role
 from .ids import new_id
 from .lease import LeaseCoordinator, LeasePolicy
-from .llm import EvidenceQAAgent
+from .llm import EvidenceQAAgent, build_chat_model
 from .parser import ParsedElement, ParsedPresentation, ParsedSlide, parse_presentation, render_slides, thumbnail_path_for
 from .purge import DocumentPurgeService
 from .qa_service import QAApplicationService
 from .query_planning import QueryPlannerAgent
+from .rerank import create_reranker
 from .retrieval import EvidenceRetriever
 from .security import OOXML_MIME, inspect_pptx
 from .skill_registry import (
@@ -33,6 +34,7 @@ from .skill_registry import (
     default_skill_paths,
 )
 from .vector import create_vector_store
+from .vision import VisualKnowledge, create_vision_enricher
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,7 @@ class QBRService:
             LeasePolicy(settings.job_lease_seconds, settings.job_heartbeat_seconds),
         )
         vector_store = create_vector_store(self.db, settings)
+        reranker = create_reranker(settings)
         self.retriever = EvidenceRetriever(
             self.db,
             mode=settings.retrieval_strategy,
@@ -96,15 +99,32 @@ class QBRService:
             rrf_k=settings.retrieval_rrf_k,
             lexical_weight=settings.retrieval_lexical_weight,
             vector_weight=settings.retrieval_vector_weight,
+            reranker=reranker,
+            rerank_candidate_k=settings.rerank_candidate_k,
+            rerank_top_n=settings.rerank_top_n,
         )
         self.document_purges = DocumentPurgeService(settings, self.db, self.retriever.rebuild_workspace)
         self.qa_agent = EvidenceQAAgent(settings) if settings.llm_configured else None
-        self.query_planner = QueryPlannerAgent(self.qa_agent.model if self.qa_agent is not None else None)
+        self.deep_qa_agent = (
+            EvidenceQAAgent(settings, model_name=settings.deep_llm_model)
+            if settings.llm_configured and settings.deep_llm_model and settings.deep_llm_model != settings.llm_model
+            else self.qa_agent
+        )
+        planner_model = None
+        if self.qa_agent is not None:
+            planner_model = (
+                build_chat_model(settings, settings.planner_model)
+                if settings.planner_model and settings.planner_model != settings.llm_model
+                else self.qa_agent.model
+            )
+        self.query_planner = QueryPlannerAgent(planner_model)
+        self.vision_enricher = create_vision_enricher(settings)
         self.qa_service = QAApplicationService(
             settings=settings,
             db=self.db,
             retriever=self.retriever,
             qa_agent=self.qa_agent,
+            deep_qa_agent=self.deep_qa_agent,
             skill_registry=self.skill_registry,
             table_reasoning_skill=self.table_reasoning_skill,
             leases=self.leases,
@@ -131,6 +151,8 @@ class QBRService:
                 "configured": self.settings.llm_configured,
                 "provider": self.settings.llm_provider if self.settings.llm_enabled else None,
                 "model": self.settings.llm_model if self.settings.llm_enabled else None,
+                "planner_model": (self.settings.planner_model or self.settings.llm_model) if self.settings.llm_enabled else None,
+                "deep_model": (self.settings.deep_llm_model or self.settings.llm_model) if self.settings.llm_enabled else None,
             },
             "retrieval": {
                 "strategy": self.settings.retrieval_strategy,
@@ -138,6 +160,13 @@ class QBRService:
                 "vector_available": self.retriever.vector_available,
                 "vector_backend": self.retriever.vector_backend,
                 "embedding_model": self.settings.embedding_model if self.settings.vector_configured else None,
+                "rerank_configured": self.settings.rerank_configured,
+                "rerank_available": self.retriever.rerank_available,
+                "rerank_model": self.settings.rerank_model if self.settings.rerank_configured else None,
+            },
+            "vision": {
+                "configured": self.settings.vision_configured,
+                "model": self.settings.vision_model if self.settings.vision_configured else None,
             },
         }
 
@@ -326,7 +355,47 @@ class QBRService:
             if self.document_purges.is_requested(str(row["document_id"])):
                 self.document_purges.discard_version_objects(str(row["workspace_id"]), str(row["version_id"]))
                 return
-            self._persist_parsed(job_id, row, parser_run_id, parsed, renders, render_warnings)
+            visual_knowledge: dict[int, VisualKnowledge] = {}
+            visual_warnings: list[dict[str, Any]] = []
+            if self.vision_enricher is not None:
+                with self.db.transaction(immediate=True) as conn:
+                    self._advance_job(conn, job_id, "visual_enrichment", 0.64)
+                eligible = [
+                    (slide, render)
+                    for slide, render in zip(parsed.slides, renders, strict=True)
+                    if self.settings.vision_enrich_all_slides
+                    or any(element.element_type == "image" for element in slide.elements)
+                ]
+                if len(eligible) > self.settings.vision_max_slides:
+                    visual_warnings.append(
+                        {
+                            "code": "VISUAL_ENRICHMENT_LIMIT",
+                            "eligible_slides": len(eligible),
+                            "processed_slides": self.settings.vision_max_slides,
+                        }
+                    )
+                for slide, render in eligible[: self.settings.vision_max_slides]:
+                    try:
+                        visual_knowledge[slide.slide_no] = self.vision_enricher.enrich(render)
+                    except Exception as exc:
+                        logger.warning("Visual enrichment failed for slide %s", slide.slide_no, exc_info=True)
+                        visual_warnings.append(
+                            {
+                                "code": "VISUAL_ENRICHMENT_FAILED",
+                                "slide_no": slide.slide_no,
+                                "error_type": type(exc).__name__,
+                            }
+                        )
+            self._persist_parsed(
+                job_id,
+                row,
+                parser_run_id,
+                parsed,
+                renders,
+                render_warnings,
+                visual_knowledge,
+                visual_warnings,
+            )
         except Exception as exc:
             if self.document_purges.is_requested(str(row["document_id"])):
                 self.document_purges.discard_version_objects(str(row["workspace_id"]), str(row["version_id"]))
@@ -405,8 +474,14 @@ class QBRService:
         parsed: ParsedPresentation,
         renders: list[Path],
         render_warnings: list[str],
+        visual_knowledge: dict[int, VisualKnowledge],
+        visual_warnings: list[dict[str, Any]],
     ) -> None:
-        warnings = [*parsed.warnings, *({"code": "RENDER_FALLBACK", "message": w} for w in render_warnings)]
+        warnings = [
+            *parsed.warnings,
+            *({"code": "RENDER_FALLBACK", "message": w} for w in render_warnings),
+            *visual_warnings,
+        ]
         status = "partial" if warnings or parsed.status == "partial" else "ready"
         charts_by_slide: dict[int, list[dict[str, Any]]] = {}
         for chart in parsed.charts:
@@ -459,6 +534,43 @@ class QBRService:
                     )
                     notes_id = self._insert_element(conn, slide_id, notes_element)
                     self._insert_chunk(conn, job, slide_id, notes_id, "notes", slide.notes)
+                visual = visual_knowledge.get(slide.slide_no)
+                if visual is not None and visual.chunks():
+                    visual_element = ParsedElement(
+                        "visual_knowledge",
+                        len(slide.elements) + 2000,
+                        {"x": 0, "y": 0, "w": 1, "h": 1},
+                        visual.summary,
+                        {
+                            "ocr_text": visual.ocr_text,
+                            "observations": list(visual.observations),
+                            "model": visual.model,
+                            "prompt_version": visual.prompt_version,
+                        },
+                        {
+                            "source": "visual_model",
+                            "model": visual.model,
+                            "prompt_version": visual.prompt_version,
+                        },
+                        visual.confidence,
+                    )
+                    visual_element_id = self._insert_element(conn, slide_id, visual_element)
+                    for chunk_type, content in visual.chunks():
+                        self._insert_chunk(
+                            conn,
+                            job,
+                            slide_id,
+                            visual_element_id,
+                            chunk_type,
+                            content,
+                            metadata_overrides={
+                                "source_kind": "visual_model",
+                                "model": visual.model,
+                                "prompt_version": visual.prompt_version,
+                                "confidence": visual.confidence,
+                                "authority": "supplemental_visual",
+                            },
+                        )
             quality = {
                 "warnings": warnings,
                 "source_priority": "embedded_workbook > chart_cache_or_literal > visual",
@@ -569,6 +681,8 @@ class QBRService:
         element_id: str,
         chunk_type: str,
         content: str,
+        *,
+        metadata_overrides: dict[str, Any] | None = None,
     ) -> str | None:
         content = content.strip()
         if not content:
@@ -579,6 +693,7 @@ class QBRService:
             "element_type": chunk_type,
             "content_role": classify_content_role({"chunk_type": chunk_type, "content": content}),
             "parser_run_id": None,
+            **(metadata_overrides or {}),
         }
         conn.execute(
             "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,1)",

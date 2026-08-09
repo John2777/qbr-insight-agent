@@ -90,6 +90,37 @@ EMBEDDING_MODEL=your-embedding-model
 
 SQLite 的 `chunk_embeddings` 是 embedding 权威数据，FAISS 文件只是按 workspace 原子重建的缓存。查询同时执行 FTS 与向量召回，以 RRF 融合；向量依赖、模型或索引失败时自动降级到 FTS。`EMBEDDING_PROVIDER=hashing` 只用于离线测试检索链路，不是生产语义模型。
 
+### 阿里云百炼（新加坡）推荐组合
+
+同一个 workspace host 下，Chat/Embedding/Vision 使用 `compatible-mode/v1`，Rerank 使用独立的 `compatible-api/v1` 地址：
+
+```dotenv
+LLM_ENABLED=true
+LLM_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+LLM_API_KEY=server-side-secret
+LLM_MODEL=qwen3.7-plus
+PLANNER_MODEL=qwen3.6-flash
+DEEP_LLM_MODEL=qwen3.7-max
+
+RETRIEVAL_STRATEGY=hybrid
+EMBEDDING_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_BATCH_SIZE=10
+
+RERANK_ENABLED=true
+RERANK_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-api/v1
+RERANK_MODEL=qwen3-rerank
+
+VISION_ENABLED=true
+VISION_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+VISION_MODEL=qwen3.7-plus
+VISION_MAX_SLIDES=50
+VISION_ENRICH_ALL_SLIDES=false
+```
+
+未单独设置 `EMBEDDING_API_KEY`、`RERANK_API_KEY` 或 `VISION_API_KEY` 时会复用服务端 `LLM_API_KEY`。默认只分析含图片元素的页面，并受 `VISION_MAX_SLIDES` 成本上限保护；显式设置 `VISION_ENRICH_ALL_SLIDES=true` 才分析整份演示文稿。视觉模型生成 `slide_visual_summary`、`visual_ocr`、`visual_observation` 三类可审计 chunk；它们标记为补充视觉证据，不能覆盖原生表格/图表数值。Embedding 身份包含 endpoint、模型与配置维度，任一配置变化都会安全重建旧向量。
+
 ## 验证
 
 ```bash
@@ -105,6 +136,7 @@ cd apps/web && npm run lint && npm test && npm run build
 .venv/bin/python scripts/evaluate_retrieval.py
 .venv/bin/python scripts/evaluate_qbr_benchmark.py --retrieval-strategy fts
 .venv/bin/python scripts/evaluate_qbr_benchmark.py --retrieval-strategy hybrid
+.venv/bin/python scripts/evaluate_qbr_benchmark.py --retrieval-strategy hybrid --rerank
 .venv/bin/python scripts/evaluate_qbr_benchmark.py \
   --cases benchmarks/qbr_terms/cases.json \
   --output-json benchmark_results/qbr_terms_latest.json \
@@ -123,6 +155,6 @@ cd apps/web && npm run lint && npm test && npm run build
 - 当前 SQLite 设计是单节点、单写者 MVP，不支持透明横向扩容。
 - FAISS 只负责语义候选召回；图表系列、左右轴、类别、数值与计算仍通过 SQLite 结构化查询，不以向量相似度代替事实关联。
 - 当前“流式”是在完整生成并通过数值/引用校验后再通过 SSE 增量传送，优先保证证据安全；不是未经校验的 provider token 直通。
-- 图片化图表目前只进入视觉复核候选；不会把像素估读伪装成精确数值。
+- 未启用视觉模型时，图片化内容只进入视觉复核候选；启用后会生成带模型、提示版本和置信度的补充检索块，但不会把像素估读伪装成精确数值。
 - 默认仅接收无宏 `.pptx`，不访问外部工作簿或远程模板。
 - 未配置或 provider 不可用时会回退到本地确定性回答，并在 run 中记录模型状态与 warning。
