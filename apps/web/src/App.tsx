@@ -7,6 +7,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ConversationHistory } from "./components/ConversationHistory";
 
 export function App() {
   const [authState, setAuthState] = useState<"checking" | "authenticated" | "anonymous">("checking");
@@ -35,6 +36,7 @@ export function App() {
           <NavLink to="/reviews">待复核</NavLink>
           <NavLink to="/analytics">运行分析</NavLink>
         </nav>
+        <ConversationHistory />
         <div className="sidebar-note"><span className="status-dot" /> 已验证会话<br/><small>证据不出当前工作区</small><button onClick={() => void logout()}>退出登录</button></div>
       </aside>
       <main className="main-content">

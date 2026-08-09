@@ -39,6 +39,28 @@ def test_facade_preserves_public_qa_contract(tmp_path: Path) -> None:
     assert result["warnings"] == ["INSUFFICIENT_EVIDENCE"]
 
 
+def test_conversation_history_is_user_scoped_and_orders_recent_activity_first(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False))
+    older = service.create_conversation("ws_demo", "user_demo", title="Older question")
+    newer = service.create_conversation("ws_demo", "user_demo", title="Latest question")
+    with service.db.transaction(immediate=True) as conn:
+        conn.execute(
+            "INSERT INTO users(id,email,display_name,created_at) VALUES (?,?,?,?)",
+            ("another_user", "another@example.com", "Another User", newer["created_at"]),
+        )
+    service.create_conversation("ws_demo", "another_user", title="Private question")
+    queued = service.ask(newer["id"], "最新的问题内容", "ws_demo", "user_demo")
+
+    items = service.list_conversations("ws_demo", "user_demo", limit=1)
+
+    assert [item["id"] for item in items] == [newer["id"]]
+    assert items[0]["last_question"] == "最新的问题内容"
+    assert items[0]["message_count"] == 2
+    assert items[0]["scope"] == {"document_ids": []}
+    assert older["id"] != items[0]["id"]
+    assert queued["run_id"]
+
+
 @pytest.mark.parametrize(
     "relative_path",
     ["deploy/docker/nginx.conf", "cloud-deployment-runbook/templates/nginx-qbr.conf"],

@@ -106,6 +106,35 @@ class QAApplicationService:
         result["messages"] = message_data
         return result
 
+    def list_conversations(
+        self,
+        workspace_id: str,
+        user_id: str,
+        limit: int = 30,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        with self.db.read() as conn:
+            rows = conn.execute(
+                """SELECT c.id,c.title,c.scope_json,c.created_at,c.updated_at,
+                     count(m.id) message_count,max(m.created_at) last_message_at,
+                     (SELECT latest.content FROM messages latest
+                       WHERE latest.conversation_id=c.id AND latest.role='user'
+                       ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1) last_question
+                   FROM conversations c LEFT JOIN messages m ON m.conversation_id=c.id
+                   WHERE c.workspace_id=? AND c.user_id=?
+                   GROUP BY c.id
+                   ORDER BY coalesce(max(m.created_at),c.updated_at) DESC,c.id DESC
+                   LIMIT ?""",
+                (workspace_id, user_id, limit),
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["scope"] = _loads(item.pop("scope_json"), {})
+            item["last_activity_at"] = item["last_message_at"] or item["updated_at"]
+            items.append(item)
+        return items
+
     def ask(
         self,
         conversation_id: str,
@@ -146,6 +175,7 @@ class QAApplicationService:
                 "INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
                 (assistant_message_id, conversation_id, "assistant", "", "running", run_id, now),
             )
+            conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             conn.execute(
                 """INSERT INTO runs(
                      id,workspace_id,conversation_id,assistant_message_id,status,warning_json,model_json,

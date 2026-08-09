@@ -96,3 +96,12 @@ export type Conversation = {
   messages: Message[];
 };
 
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  scope: { document_ids: string[] };
+  message_count: number;
+  last_question?: string;
+  last_activity_at: string;
+  created_at: string;
+};

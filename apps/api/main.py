@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Form, Header, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -483,6 +483,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return service.create_conversation(
             principal.workspace_id, principal.user_id, body.document_ids, body.title
         )
+
+    @app.get("/api/v1/conversations")
+    def conversations(
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[QBRService, Depends(_service)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    ) -> dict[str, Any]:
+        return {"items": service.list_conversations(principal.workspace_id, principal.user_id, limit)}
 
     @app.get("/api/v1/conversations/{conversation_id}")
     def conversation(

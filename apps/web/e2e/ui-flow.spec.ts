@@ -21,6 +21,7 @@ test("queued answer is rendered from the SSE stream", async ({ page }) => {
   await mockSession(page);
   let complete = false;
   await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [{ id: "doc_1", title: "FY25 Q4 Review", status: "ready", updated_at: "2026-08-07T00:00:00Z" }] } }));
+  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: complete ? [{ id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, message_count: 2, last_question: "Q2 Revenue 是多少？", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z" }] : [] } }));
   await page.route("**/api/v1/conversations", (route) => route.fulfill({ status: 201, json: { id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, messages: [] } }));
   await page.route("**/api/v1/conversations/conv_1/messages", (route) => route.fulfill({ status: 202, json: { run_id: "run_1", events_url: "/api/v1/runs/run_1/events" } }));
   await page.route("**/api/v1/runs/run_1/events", async (route) => {
@@ -41,6 +42,29 @@ test("queued answer is rendered from the SSE stream", async ({ page }) => {
   await expect(page.getByText("Q2 Revenue 为 20。 [1]")).toBeVisible();
   await expect(page.getByRole("button", { name: "复制提问" })).toBeVisible();
   await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Revenue.*Q2 Revenue 是多少/ })).toBeVisible();
+});
+
+test("conversation history opens the complete question and answer", async ({ page }) => {
+  await mockSession(page);
+  await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: [{
+    id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, message_count: 2,
+    last_question: "VONB 是什么含义？", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z"
+  }] } }));
+  await page.route("**/api/v1/conversations/conv_history", (route) => route.fulfill({ json: {
+    id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, messages: [
+      { id: "history_user", role: "user", content: "VONB 是什么含义？", status: "completed", citations: [] },
+      { id: "history_answer", role: "assistant", content: "VONB 指新业务价值。", status: "completed", citations: [] }
+    ]
+  } }));
+
+  await page.goto("/documents");
+  await page.getByRole("link", { name: /VONB 含义.*VONB 是什么含义/ }).click();
+
+  await expect(page).toHaveURL(/\/chat\/conv_history$/);
+  await expect(page.getByRole("main").getByText("VONB 是什么含义？", { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText("VONB 指新业务价值。", { exact: true })).toBeVisible();
 });
 
 test("analytics page exposes quality metrics", async ({ page }) => {

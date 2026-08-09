@@ -43,6 +43,11 @@ def test_upload_ingest_query_citation_and_delete(tmp_path: Path, synthetic_pptx:
             json={"content": "Q2 Revenue 是多少？"},
         )
         assert sent.status_code == 202
+        history = client.get("/api/v1/conversations?limit=10")
+        assert history.status_code == 200
+        assert history.json()["items"][0]["id"] == conversation["id"]
+        assert history.json()["items"][0]["last_question"] == "Q2 Revenue 是多少？"
+        assert history.json()["items"][0]["message_count"] == 2
         assert app.state.service.process_next_run("test-worker") == sent.json()["run_id"]
         run = client.get(f"/api/v1/runs/{sent.json()['run_id']}").json()
         assert "20" in run["message"]["content"]

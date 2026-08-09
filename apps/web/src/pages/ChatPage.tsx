@@ -5,6 +5,7 @@ import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { SlideCanvas } from "../components/SlideCanvas";
 import { AssistantAnswer } from "../components/AssistantAnswer";
 import { MessageCopyButton } from "../components/MessageCopyButton";
+import { notifyConversationHistoryChanged } from "../components/ConversationHistory";
 import type { Citation, Conversation, DocumentItem, SlideDetail } from "../types";
 
 export function ChatPage() {
@@ -14,7 +15,23 @@ export function ChatPage() {
   const [question, setQuestion] = useState(""); const [sending, setSending] = useState(false); const [citation, setCitation] = useState<Citation | null>(null); const [slide, setSlide] = useState<SlideDetail | null>(null);
   const [streamingAnswer, setStreamingAnswer] = useState(""); const [stage, setStage] = useState(""); const [error, setError] = useState("");
   useEffect(() => { api<{ items: DocumentItem[] }>("/api/v1/documents").then(({ items }) => setDocuments(items.filter((d) => ["ready", "partial"].includes(d.status)))); }, []);
-  useEffect(() => { if (conversationId) api<Conversation>(`/api/v1/conversations/${conversationId}`).then(setConversation); }, [conversationId]);
+  useEffect(() => {
+    let active = true;
+    if (!conversationId) {
+      setConversation(null);
+      setSelected(params.get("document") ? [params.get("document")!] : []);
+      return () => { active = false; };
+    }
+    setError("");
+    void api<Conversation>(`/api/v1/conversations/${conversationId}`)
+      .then((item) => {
+        if (!active) return;
+        setConversation(item);
+        setSelected(item.scope.document_ids ?? []);
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "历史问答加载失败"); });
+    return () => { active = false; };
+  }, [conversationId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault(); if (!question.trim() || sending) return; setSending(true); setError(""); setStreamingAnswer("");
@@ -28,7 +45,7 @@ export function ChatPage() {
         if (event.event === "answer_delta") setStreamingAnswer((value) => value + String(event.data.delta ?? ""));
         if (event.event === "warning") setStage(String(event.data.message ?? event.data.code ?? "已降级处理"));
       });
-      setConversation(await api<Conversation>(`/api/v1/conversations/${id}`)); setStreamingAnswer(""); setStage("");
+      setConversation(await api<Conversation>(`/api/v1/conversations/${id}`)); setStreamingAnswer(""); setStage(""); notifyConversationHistoryChanged();
     } catch (err) { setError(err instanceof Error ? err.message : "回答失败"); }
     finally { setSending(false); }
   }

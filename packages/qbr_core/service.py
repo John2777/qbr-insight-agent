@@ -1075,6 +1075,14 @@ class QBRService:
     def get_conversation(self, conversation_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         return self.qa_service.get_conversation(conversation_id, workspace_id, user_id)
 
+    def list_conversations(
+        self,
+        workspace_id: str,
+        user_id: str,
+        limit: int = 30,
+    ) -> list[dict[str, Any]]:
+        return self.qa_service.list_conversations(workspace_id, user_id, limit)
+
     def ask(
         self,
         conversation_id: str,
