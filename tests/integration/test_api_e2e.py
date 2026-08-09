@@ -32,7 +32,12 @@ def test_upload_ingest_query_citation_and_delete(tmp_path: Path, synthetic_pptx:
         assert len(slides) == 2
         slide = client.get(f"/api/v1/slides/{slides[0]['id']}").json()
         assert slide["charts"][0]["series"][0]["points"][1]["y_value"] == 20
-        assert client.get(slide["preview_url"]).status_code == 200
+        preview = client.get(slide["preview_url"])
+        thumbnail = client.get(slide["thumbnail_url"])
+        assert preview.status_code == 200
+        assert thumbnail.status_code == 200
+        assert "immutable" in preview.headers["cache-control"]
+        assert "immutable" in thumbnail.headers["cache-control"]
 
         conversation = client.post(
             "/api/v1/conversations",

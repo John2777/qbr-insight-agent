@@ -98,6 +98,7 @@ class QAApplicationService:
             message_data = []
             for message in messages:
                 item = dict(message)
+                item["metadata"] = _loads(item.pop("metadata_json", None), {})
                 citations = conn.execute("SELECT * FROM citations WHERE message_id=? ORDER BY claim_no", (message["id"],)).fetchall()
                 item["citations"] = [self._citation_public(dict(citation), conn) for citation in citations]
                 message_data.append(item)
@@ -227,12 +228,14 @@ class QAApplicationService:
                         "reused": True,
                     }
             conn.execute(
-                "INSERT INTO messages VALUES (?,?,?,?,?,NULL,?)",
+                """INSERT INTO messages(id,conversation_id,role,content,status,run_id,metadata_json,created_at)
+                   VALUES (?,?,?,?,?,NULL,'{}',?)""",
                 (user_message_id, conversation_id, "user", content, "completed", now),
             )
             conn.execute(
-                "INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
-                (assistant_message_id, conversation_id, "assistant", "", "running", run_id, now),
+                """INSERT INTO messages(id,conversation_id,role,content,status,run_id,metadata_json,created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (assistant_message_id, conversation_id, "assistant", "", "running", run_id, "{}", now),
             )
             conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             conn.execute(
@@ -304,6 +307,7 @@ class QAApplicationService:
             raise InvalidState("Run has no user question")
         question = str(question_row["content"])
         scope = _loads(run["scope_json"], {})
+        answer_mode = self.answer_engine.answer_mode(question)
         try:
             with self.db.transaction(immediate=True) as conn:
                 self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "正在检索文档证据"})
@@ -316,8 +320,9 @@ class QAApplicationService:
                 "provider": self.settings.llm_provider if self.settings.llm_enabled else None,
                 "model": self.settings.llm_model if self.settings.llm_enabled else None,
                 "status": "disabled" if not self.settings.llm_enabled else "skipped_no_evidence",
+                "answer_mode": answer_mode,
             }
-            if self.qa_agent and evidence:
+            if self.qa_agent and evidence and answer_mode != "term_definition":
                 with self.db.transaction(immediate=True) as conn:
                     self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
                 generated = self.qa_agent.answer(
@@ -325,11 +330,23 @@ class QAApplicationService:
                     deterministic_answer=answer,
                     evidence=evidence,
                     history=[dict(row) for row in reversed(history_rows)],
+                    answer_mode=answer_mode,
                 )
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
-                model_info = generated.model
-            self._complete_run(run, answer, evidence, warnings, model_info)
+                model_info = {**generated.model, "answer_mode": answer_mode}
+            elif answer_mode == "term_definition":
+                model_info["status"] = "skipped_curated_glossary"
+            message_metadata = {
+                "answer_mode": answer_mode,
+                "show_visuals": answer_mode != "term_definition",
+                "knowledge_source": (
+                    "curated_glossary+document" if answer_mode == "term_definition" and evidence
+                    else "curated_glossary" if answer_mode == "term_definition"
+                    else "document_evidence"
+                ),
+            }
+            self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
         except Exception as exc:
             with self.db.transaction(immediate=True) as conn:
                 current = conn.execute("SELECT attempts FROM runs WHERE id=?", (run_id,)).fetchone()
@@ -359,10 +376,14 @@ class QAApplicationService:
         evidence: list[dict[str, Any]],
         warnings: list[str],
         model_info: dict[str, Any],
+        message_metadata: dict[str, Any] | None = None,
     ) -> None:
         run_id = str(run["id"])
         with self.db.transaction(immediate=True) as conn:
-            conn.execute("UPDATE messages SET content=?,status='completed' WHERE id=?", (answer, run["assistant_message_id"]))
+            conn.execute(
+                "UPDATE messages SET content=?,status='completed',metadata_json=? WHERE id=?",
+                (answer, self.db.json(message_metadata or {}), run["assistant_message_id"]),
+            )
             for index, evidence_item in enumerate(evidence, 1):
                 citation_id = new_id("cit")
                 conn.execute(
@@ -450,7 +471,12 @@ class QAApplicationService:
             result = dict(row)
             result["warnings"] = _loads(result.pop("warning_json"), [])
             result["model"] = _loads(result.pop("model_json"), {})
-            result["message"] = dict(message) if message else None
+            if message:
+                public_message = dict(message)
+                public_message["metadata"] = _loads(public_message.pop("metadata_json", None), {})
+                result["message"] = public_message
+            else:
+                result["message"] = None
             result["citations"] = [self._citation_public(dict(citation), conn) for citation in citations]
             return result
 

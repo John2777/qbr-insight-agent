@@ -7,6 +7,7 @@ from typing import Any
 from .db import Database
 from .retrieval import EvidenceRetriever
 from .skill_registry import SkillDescriptor, SkillRegistry
+from .terminology import TermDefinition, find_term
 
 
 def _loads(value: str | None, default: Any) -> Any:
@@ -26,16 +27,65 @@ def _format_chart_value(row: dict[str, Any]) -> str:
 
 
 SUMMARY_INTENT_TERMS = (
-    "概括", "概览", "总结", "综述", "整体", "总体", "全局", "业绩情况", "经营情况",
-    "表现如何", "情况如何", "怎么样", "亮点", "要点", "核心结论", "当前文档",
-    "这份文档", "整个文档", "这份ppt", "summary", "summarize", "overview", "overall",
-    "performance", "highlights", "key takeaways", "how is the business doing",
+    "概括",
+    "概览",
+    "总结",
+    "综述",
+    "整体",
+    "总体",
+    "全局",
+    "业绩情况",
+    "经营情况",
+    "表现如何",
+    "情况如何",
+    "怎么样",
+    "亮点",
+    "要点",
+    "核心结论",
+    "当前文档",
+    "这份文档",
+    "整个文档",
+    "这份ppt",
+    "summary",
+    "summarize",
+    "overview",
+    "overall",
+    "performance",
+    "highlights",
+    "key takeaways",
+    "how is the business doing",
 )
 
 PERFORMANCE_TERMS = (
-    "executive", "snapshot", "summary", "业绩", "经营", "表现", "增长", "收入", "营收",
-    "利润", "盈利", "现金", "价值", "财务", "指标", "kpi", "revenue", "profit", "margin",
-    "growth", "sales", "actual", "target", "同比", "环比", "达成", "完成", "趋势", "亮点",
+    "executive",
+    "snapshot",
+    "summary",
+    "业绩",
+    "经营",
+    "表现",
+    "增长",
+    "收入",
+    "营收",
+    "利润",
+    "盈利",
+    "现金",
+    "价值",
+    "财务",
+    "指标",
+    "kpi",
+    "revenue",
+    "profit",
+    "margin",
+    "growth",
+    "sales",
+    "actual",
+    "target",
+    "同比",
+    "环比",
+    "达成",
+    "完成",
+    "趋势",
+    "亮点",
 )
 
 
@@ -61,6 +111,19 @@ class DeterministicAnswerEngine:
         placeholders = ",".join("?" for _ in document_ids)
         return f" AND d.id IN ({placeholders})", list(document_ids)
 
+    @staticmethod
+    def answer_mode(question: str) -> str:
+        if find_term(question) is not None:
+            return "term_definition"
+        if DeterministicAnswerEngine._is_summary_question(question):
+            return "summary"
+        folded = question.casefold()
+        if any(term in folded for term in ("图", "趋势", "走势", "控制图", "折线", "柱状", "chart")):
+            return "chart_analysis"
+        if any(term in folded for term in ("表", "矩阵", "阈值", "排序", "合计", "table")):
+            return "table_analysis"
+        return "evidence_answer"
+
     def answer(
         self,
         question: str,
@@ -84,6 +147,9 @@ class DeterministicAnswerEngine:
                 (workspace_id, *scope_args),
             ).fetchall()
             scoped_chunks = [dict(row) for row in content_rows]
+            term_definition = self._term_definition_answer(question, scoped_chunks)
+            if term_definition:
+                return term_definition
             abstention = self._constraint_abstention(question, scoped_chunks)
             if abstention:
                 return abstention
@@ -93,11 +159,11 @@ class DeterministicAnswerEngine:
             provenance = self._provenance_answer(question, scoped_chunks)
             if provenance:
                 return provenance
-            explicit_chart_intent = any(
-                term in question.casefold() for term in ("图", "月度", "控制图", "模拟值", "路径")
-            )
-            table_result = None if explicit_chart_intent else self._table_reasoning_answer(
-                question, [row for row in scoped_chunks if row.get("chunk_type") == "table"]
+            explicit_chart_intent = any(term in question.casefold() for term in ("图", "月度", "控制图", "模拟值", "路径"))
+            table_result = (
+                None
+                if explicit_chart_intent
+                else self._table_reasoning_answer(question, [row for row in scoped_chunks if row.get("chunk_type") == "table"])
             )
             if table_result:
                 return table_result.answer, [self._chunk_evidence(table_result.source)], []
@@ -168,6 +234,47 @@ class DeterministicAnswerEngine:
         statements = [f"- {row['content'][:350]} [{index}]" for index, row in enumerate(selected_chunks, 1)]
         return "根据文档中检索到的直接证据：\n\n" + "\n".join(statements), evidence, []
 
+    def _term_definition_answer(
+        self,
+        question: str,
+        chunks: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]], list[str]] | None:
+        definition = find_term(question)
+        if definition is None:
+            return None
+        source = self._definition_source(definition, chunks)
+        answer = definition.answer()
+        if source is not None:
+            source_text = str(source.get("content") or "").casefold()
+            document_label = (
+                f"{definition.term} / {definition.chinese_name}" if definition.chinese_name.casefold() in source_text else definition.term
+            )
+            answer += f"\n\n当前文档中也使用了“{document_label}”这一术语。[1]"
+            return answer, [self._chunk_evidence(source)], []
+        answer += "\n\n以上是内置 QBR 术语表中的通用解释；具体计算公式和公司口径应以当前文档披露为准。"
+        return answer, [], []
+
+    @staticmethod
+    def _definition_source(
+        definition: TermDefinition,
+        chunks: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        aliases = tuple(alias.casefold() for alias in definition.search_aliases if len(alias.strip()) >= 2)
+        candidates: list[tuple[float, dict[str, Any]]] = []
+        for row in chunks:
+            content = str(row.get("content") or "").strip()
+            folded = content.casefold()
+            if not any(alias in folded for alias in aliases):
+                continue
+            matched = sum(alias in folded for alias in aliases)
+            has_term_and_name = definition.term.casefold() in folded and definition.chinese_name.casefold() in folded
+            numeric_count = len(re.findall(r"\d", content))
+            compact_bonus = max(0.0, 8.0 - len(content) / 80)
+            type_bonus = 4 if row.get("chunk_type") == "text" else 1 if row.get("chunk_type") == "table" else 0
+            score = matched * 6 + int(has_term_and_name) * 20 + compact_bonus + type_bonus - numeric_count * 0.5
+            candidates.append((score, row))
+        return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
     def _table_reasoning_answer(self, question: str, sources: list[dict[str, Any]]) -> Any:
         if not sources:
             return None
@@ -233,14 +340,15 @@ class DeterministicAnswerEngine:
                 if not re.match(r"(?i)^owner\s*[·:：]", content):
                     continue
                 owner = re.sub(r"(?i)^owner\s*[·:：]\s*", "", content).strip()
-                prior = [
-                    str(candidate.get("content") or "").strip()
-                    for candidate in rows[max(0, index - 3):index]
-                ]
+                prior = [str(candidate.get("content") or "").strip() for candidate in rows[max(0, index - 3) : index]]
                 titles = [
-                    text for text in prior
-                    if text and len(text) <= 30 and not re.fullmatch(r"\d{1,3}", text)
-                    and "QBR" not in text.upper() and not text.endswith(("。", "."))
+                    text
+                    for text in prior
+                    if text
+                    and len(text) <= 30
+                    and not re.fullmatch(r"\d{1,3}", text)
+                    and "QBR" not in text.upper()
+                    and not text.endswith(("。", "."))
                 ]
                 if titles:
                     actions.append((min(titles, key=len), owner))
@@ -267,11 +375,9 @@ class DeterministicAnswerEngine:
             return None
         notes = [row for row in chunks if row.get("chunk_type") == "notes"]
         public_candidates = [
-            row for row in notes
-            if any(
-                term in str(row.get("content") or "").casefold()
-                for term in ("official results", "official new business", "公开披露")
-            )
+            row
+            for row in notes
+            if any(term in str(row.get("content") or "").casefold() for term in ("official results", "official new business", "公开披露"))
         ]
         public = max(
             public_candidates,
@@ -283,7 +389,8 @@ class DeterministicAnswerEngine:
             default=None,
         )
         monthly_candidates = [
-            row for row in notes
+            row
+            for row in notes
             if "monthly" in str(row.get("content") or "").casefold()
             and any(term in str(row.get("content") or "").casefold() for term in ("synthetic", "模拟", "test"))
         ]
@@ -297,15 +404,10 @@ class DeterministicAnswerEngine:
         )
         matrix = next(
             (
-                row for row in notes
-                if any(
-                    term in str(row.get("content") or "").casefold()
-                    for term in ("operating table", "经营矩阵", "table values")
-                )
-                and any(
-                    term in str(row.get("content") or "").casefold()
-                    for term in ("synthetic", "模拟", "illustrative")
-                )
+                row
+                for row in notes
+                if any(term in str(row.get("content") or "").casefold() for term in ("operating table", "经营矩阵", "table values"))
+                and any(term in str(row.get("content") or "").casefold() for term in ("synthetic", "模拟", "illustrative"))
             ),
             None,
         )
@@ -385,9 +487,7 @@ class DeterministicAnswerEngine:
             if len(rows) >= 2:
                 score += 2
             ranked_series.append((score, rows))
-        ranked_series.sort(
-            key=lambda item: (-item[0], int(item[1][0].get("slide_no") or 0), str(item[1][0].get("series_name") or ""))
-        )
+        ranked_series.sort(key=lambda item: (-item[0], int(item[1][0].get("slide_no") or 0), str(item[1][0].get("series_name") or "")))
         used_series_labels: set[tuple[str, str]] = set()
         selected_series_rows: list[list[dict[str, Any]]] = []
         for _, rows in ranked_series:
@@ -407,7 +507,7 @@ class DeterministicAnswerEngine:
                 [],
                 ["INSUFFICIENT_EVIDENCE"],
             )
-        series_evidence = evidence[len(selected_slides):]
+        series_evidence = evidence[len(selected_slides) :]
         trends: list[tuple[str, str, str, int]] = []
         for citation_no, item in enumerate(series_evidence, len(selected_slides) + 1):
             match = re.match(r".*? — (.*?): (.*)", item["quote"], flags=re.S)
@@ -434,8 +534,7 @@ class DeterministicAnswerEngine:
             if takeaway:
                 takeaway_lines.append(f"- {takeaway} [{index}]")
         trend_lines = [
-            f"| {name} | {first_point} | {last_point} | [{citation_no}] |"
-            for name, first_point, last_point, citation_no in trends
+            f"| {name} | {first_point} | {last_point} | [{citation_no}] |" for name, first_point, last_point, citation_no in trends
         ]
         return (
             "## 总体判断\n\n"
@@ -444,7 +543,8 @@ class DeterministicAnswerEngine:
             "## 关键趋势\n\n"
             + (
                 "| 指标 | 起始期 | 最新期 | 证据 |\n|---|---:|---:|---|\n" + "\n".join(trend_lines)
-                if trend_lines else "核心趋势数据见下方原生图表。 [1]"
+                if trend_lines
+                else "核心趋势数据见下方原生图表。 [1]"
             )
             + "\n\n## 经营解读\n\n"
             + ("\n".join(takeaway_lines) if takeaway_lines else "- 文档已提供可核验的经营与财务信息。 [1]")
@@ -461,11 +561,7 @@ class DeterministicAnswerEngine:
         candidates = [
             part.replace("\n", " ")
             for part in parts
-            if part != title
-            and not part.startswith("QBR ")
-            and not re.fullmatch(r"\d{1,3}", part)
-            and len(part) >= 8
-            and len(part) <= 220
+            if part != title and not part.startswith("QBR ") and not re.fullmatch(r"\d{1,3}", part) and len(part) >= 8 and len(part) <= 220
         ]
         if not candidates:
             return title
@@ -521,8 +617,10 @@ class DeterministicAnswerEngine:
             score = 0
             axis = self._axis_metadata_from_row(row)
             for value, weight in [
-                (row.get("series_name"), 3), (row.get("category"), 3),
-                (row.get("chart_title"), 2), (axis.get("title"), 2),
+                (row.get("series_name"), 3),
+                (row.get("category"), 3),
+                (row.get("chart_title"), 2),
+                (axis.get("title"), 2),
                 (row.get("document_title"), 1),
             ]:
                 if value and str(value).casefold() in folded:
@@ -601,13 +699,11 @@ class DeterministicAnswerEngine:
             delta = second_value - first_value
             rate = delta / abs(first_value) * 100 if first_value else None
             rate_text = f"，相对增幅约{rate:.1f}%" if rate is not None else "，基期为0，无法计算相对增幅"
-            answer = (
-                f"{first_label}为{first_value:g}，{second_label}为{second_value:g}；"
-                f"增加{delta:g}{rate_text}。 [1][2]"
-            )
+            answer = f"{first_label}为{first_value:g}，{second_label}为{second_value:g}；增加{delta:g}{rate_text}。 [1][2]"
         else:
-            higher, lower = max((first, second), key=lambda row: float(row["y_value"])), min(
-                (first, second), key=lambda row: float(row["y_value"])
+            higher, lower = (
+                max((first, second), key=lambda row: float(row["y_value"])),
+                min((first, second), key=lambda row: float(row["y_value"])),
             )
             difference = float(higher["y_value"]) - float(lower["y_value"])
             answer = (
@@ -636,9 +732,7 @@ class DeterministicAnswerEngine:
         reverse = operation in {"最高", "最大"}
         selected = sorted(rows, key=lambda row: float(row["y_value"]), reverse=reverse)[0]
         value = selected.get("display_value") or f"{float(selected['y_value']):g}"
-        answer = (
-            f"{selected.get('series_name')}在{selected.get('category')}达到{operation}值{value}。 [1]"
-        )
+        answer = f"{selected.get('series_name')}在{selected.get('category')}达到{operation}值{value}。 [1]"
         return answer, [self._point_evidence(selected)], []
 
     def _composition_answer(
@@ -662,8 +756,7 @@ class DeterministicAnswerEngine:
             if not 98 <= total <= 102:
                 continue
             context = " ".join(
-                str(ordered[0].get(key) or "")
-                for key in ("chart_title", "series_name", "slide_title", "slide_summary", "document_title")
+                str(ordered[0].get(key) or "") for key in ("chart_title", "series_name", "slide_title", "slide_summary", "document_title")
             )
             score = sum(3 for term in ("渠道", "组合", "触点", "代理") if term in question and term in context)
             score += sum(2 for row in ordered if str(row.get("category") or "") in question)
@@ -676,13 +769,8 @@ class DeterministicAnswerEngine:
         agent_value = float(agent["y_value"])
         non_agent = sum(float(row["y_value"]) for row in others)
         agent_label = str(agent.get("category") or "代理触点")
-        detail = "、".join(
-            f"{row.get('category')} {_format_chart_value(row)}" for row in others
-        )
-        answer = (
-            f"{agent_label}（代理触点）占{agent_value:g}%，非代理触点合计占{non_agent:g}%；"
-            f"非代理触点由{detail}构成。 [1]"
-        )
+        detail = "、".join(f"{row.get('category')} {_format_chart_value(row)}" for row in others)
+        answer = f"{agent_label}（代理触点）占{agent_value:g}%，非代理触点合计占{non_agent:g}%；非代理触点由{detail}构成。 [1]"
         return answer, [self._series_evidence(rows)], []
 
     def _max_drop_answer(
@@ -703,8 +791,7 @@ class DeterministicAnswerEngine:
             if len(ordered) < 2:
                 continue
             context = " ".join(
-                str(ordered[0].get(key) or "")
-                for key in ("chart_title", "series_name", "slide_title", "slide_summary", "document_title")
+                str(ordered[0].get(key) or "") for key in ("chart_title", "series_name", "slide_title", "slide_summary", "document_title")
             )
             context_score = sum(4 for term in ("资本", "情景", "路径", "阶段") if term in question and term in context)
             for previous, current in zip(ordered, ordered[1:], strict=False):
@@ -731,15 +818,10 @@ class DeterministicAnswerEngine:
         selected = [row for row in selected if row.get("y_value") is not None]
         if not selected:
             return "已定位到相关图表，但缺少可用于精确回答的数值。", [], ["INSUFFICIENT_EVIDENCE"]
-        growth = any(
-            term in question.casefold()
-            for term in ["增长", "增幅", "增加", "变化", "环比", "同比", "change", "growth"]
-        )
+        growth = any(term in question.casefold() for term in ["增长", "增幅", "增加", "变化", "环比", "同比", "change", "growth"])
         if growth:
             same_series = [
-                row
-                for _, row in ranked
-                if row.get("series_id") == selected[0].get("series_id") and row.get("y_value") is not None
+                row for _, row in ranked if row.get("series_id") == selected[0].get("series_id") and row.get("y_value") is not None
             ]
             unique = {int(row["point_order"]): row for row in same_series}
             ordered = [unique[key] for key in sorted(unique)]
@@ -813,9 +895,14 @@ class DeterministicAnswerEngine:
 
     def _chunk_evidence(self, row: dict[str, Any]) -> dict[str, Any]:
         return {
-            "document_version_id": row["document_version_id"], "slide_id": row["slide_id"],
-            "element_id": row.get("element_id"), "chunk_id": row["id"], "quote": row["content"][:500],
-            "bbox": _loads(row.get("bbox_json"), {}), "confidence": 1.0, "source_kind": "native_ooxml",
-            "document_title": row.get("document_title"), "slide_no": row.get("slide_no"),
+            "document_version_id": row["document_version_id"],
+            "slide_id": row["slide_id"],
+            "element_id": row.get("element_id"),
+            "chunk_id": row["id"],
+            "quote": row["content"][:500],
+            "bbox": _loads(row.get("bbox_json"), {}),
+            "confidence": 1.0,
+            "source_kind": "native_ooxml",
+            "document_title": row.get("document_title"),
+            "slide_no": row.get("slide_no"),
         }
-

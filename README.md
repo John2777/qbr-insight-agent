@@ -105,9 +105,14 @@ cd apps/web && npm run lint && npm test && npm run build
 .venv/bin/python scripts/evaluate_retrieval.py
 .venv/bin/python scripts/evaluate_qbr_benchmark.py --retrieval-strategy fts
 .venv/bin/python scripts/evaluate_qbr_benchmark.py --retrieval-strategy hybrid
+.venv/bin/python scripts/evaluate_qbr_benchmark.py \
+  --cases benchmarks/qbr_terms/cases.json \
+  --output-json benchmark_results/qbr_terms_latest.json \
+  --output-md benchmark_results/qbr_terms_latest.md \
+  --min-score 95
 ```
 
-默认使用 QBR-50 数据集；分别运行 `fts`、`vector`、`hybrid` 即可进行检索消融。原 QBR-30 数据集保留用于历史回归对比，报告会记录实际策略和向量降级诊断。
+默认使用 QBR-50 数据集；分别运行 `fts`、`vector`、`hybrid` 即可进行检索消融。原 QBR-30 数据集保留用于历史回归对比。`qbr-terms` 提供 50 个管理、财务、寿险、客户与销售术语的独立解释回归，报告会同时检查回答模式、无关内容和引用节制。
 
 浏览器测试使用 `cd apps/web && npm run test:e2e`。Playwright 会在隔离的临时数据目录中启动真实 FastAPI 和内联 worker；
 真实链路覆盖合成 PPTX 上传、动态 ParserSkill 加载、解析完成、SSE 问答与引用展示，其余 UI 状态继续使用路由 mock 做快速验证。

@@ -18,6 +18,7 @@ export type SlideItem = {
   summary?: string;
   quality_score: number;
   preview_url: string;
+  thumbnail_url?: string;
   element_count?: number;
 };
 
@@ -87,6 +88,11 @@ export type Message = {
   content: string;
   status: string;
   citations: Citation[];
+  metadata?: {
+    answer_mode?: string;
+    show_visuals?: boolean;
+    knowledge_source?: string;
+  };
 };
 
 export type Conversation = {

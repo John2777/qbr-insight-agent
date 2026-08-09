@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, statusLabel } from "../api";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
@@ -17,17 +17,30 @@ export function DocumentDetailPage() {
   const [tab, setTab] = useState<"content" | "charts" | "notes">("content");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const slideDetailRequests = useRef(new Map<string, Promise<SlideDetail>>());
 
   useEffect(() => { if (!documentId) return; api<DocumentDetail>(`/api/v1/documents/${documentId}`).then(setDocument); }, [documentId]);
   useEffect(() => {
     const version = document?.versions[0]; if (!version?.active_parser_run_id) return;
-    api<{ items: SlideItem[] }>(`/api/v1/document-versions/${version.id}/slides`).then(({ items }) => {
-      setSlides(items); const wanted = Number(params.get("slide")); const selected = items.find((s) => s.slide_no === wanted) ?? items[0];
-      if (selected) api<SlideDetail>(`/api/v1/slides/${selected.id}`).then(setCurrent);
-    });
-  }, [document, params]);
+    api<{ items: SlideItem[] }>(`/api/v1/document-versions/${version.id}/slides`).then(({ items }) => setSlides(items));
+  }, [document]);
 
-  function choose(slide: SlideItem) { setParams({ slide: String(slide.slide_no) }); api<SlideDetail>(`/api/v1/slides/${slide.id}`).then(setCurrent); }
+  const selectedSlideNo = Number(params.get("slide"));
+  useEffect(() => {
+    const selected = slides.find((slide) => slide.slide_no === selectedSlideNo) ?? slides[0];
+    if (!selected) return;
+    let active = true;
+    let request = slideDetailRequests.current.get(selected.id);
+    if (!request) {
+      request = api<SlideDetail>(`/api/v1/slides/${selected.id}`);
+      slideDetailRequests.current.set(selected.id, request);
+      void request.catch(() => slideDetailRequests.current.delete(selected.id));
+    }
+    void request.then((slide) => { if (active) setCurrent(slide); }, () => undefined);
+    return () => { active = false; };
+  }, [selectedSlideNo, slides]);
+
+  function choose(slide: SlideItem) { setParams({ slide: String(slide.slide_no) }); }
 
   async function purge() {
     if (!document || deleting) return;
@@ -59,7 +72,7 @@ export function DocumentDetailPage() {
       {header}
       {deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}
       <div className="detail-grid">
-        <aside className="slide-nav" aria-label="幻灯片列表">{slides.map((slide) => <button key={slide.id} onClick={() => choose(slide)} className={current?.id === slide.id ? "active" : ""}><span>{slide.slide_no}</span><img src={slide.preview_url} alt=""/><small>{slide.title || "无标题"}</small></button>)}</aside>
+        <aside className="slide-nav" aria-label="幻灯片列表">{slides.map((slide) => <button key={slide.id} onClick={() => choose(slide)} className={current?.id === slide.id ? "active" : ""}><span>{slide.slide_no}</span><img src={slide.thumbnail_url ?? slide.preview_url} alt={`第 ${slide.slide_no} 页缩略图`} loading="lazy" decoding="async" width="320" height="180"/><small>{slide.title || "无标题"}</small></button>)}</aside>
         <div className="preview-pane">{current && <><div className="preview-toolbar"><strong>第 {current.slide_no} 页</strong><span>质量 {Math.round(current.quality_score * 100)}%</span></div><SlideCanvas slide={current}/></>}</div>
         <aside className="structured-pane">
           <div className="tabs"><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>内容</button><button className={tab === "charts" ? "active" : ""} onClick={() => setTab("charts")}>图表</button><button className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}>备注</button></div>

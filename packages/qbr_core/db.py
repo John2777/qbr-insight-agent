@@ -11,7 +11,7 @@ from typing import Any
 
 from .ids import new_id
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def utc_now() -> str:
@@ -126,7 +126,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, run_id TEXT, created_at TEXT NOT NULL
+  role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, run_id TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL,
@@ -226,6 +227,9 @@ class Database:
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
         """Small, explicit migrations suitable for the single-node demo deployment."""
+        message_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if "metadata_json" not in message_columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
         run_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
         additions = {
             "model_json": "TEXT NOT NULL DEFAULT '{}'",

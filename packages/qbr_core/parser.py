@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from PIL import Image, ImageOps
+
 from .security import OOXML_MIME, inspect_pptx
 from .skill_registry import (
     NATIVE_CHART_CAPABILITY,
@@ -222,6 +224,43 @@ def parse_presentation(
     return ParsedPresentation(digest, slides, chart_result["charts"], warnings, status, chart_result)
 
 
+PREVIEW_MAX_SIZE = (1920, 1080)
+THUMBNAIL_SIZE = (320, 180)
+
+
+def thumbnail_path_for(preview_path: Path) -> Path:
+    return preview_path.with_name(f"{preview_path.stem}-thumbnail.webp")
+
+
+def _write_webp_variants(source_path: Path, preview_path: Path) -> tuple[Path, Path]:
+    thumbnail_path = thumbnail_path_for(preview_path)
+    with Image.open(source_path) as source:
+        preview = source.convert("RGB")
+    try:
+        preview.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS, reducing_gap=3.0)
+        preview.save(preview_path, format="WEBP", quality=84, method=4)
+
+        thumbnail_content = ImageOps.contain(preview, THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+        try:
+            with Image.new("RGB", THUMBNAIL_SIZE, "white") as thumbnail:
+                left = (THUMBNAIL_SIZE[0] - thumbnail_content.width) // 2
+                top = (THUMBNAIL_SIZE[1] - thumbnail_content.height) // 2
+                thumbnail.paste(thumbnail_content, (left, top))
+                thumbnail.save(thumbnail_path, format="WEBP", quality=76, method=4)
+        finally:
+            thumbnail_content.close()
+    finally:
+        preview.close()
+    return preview_path, thumbnail_path
+
+
+def _rendered_page_number(path: Path) -> int:
+    try:
+        return int(path.stem.rsplit("-", 1)[-1])
+    except ValueError:
+        return 0
+
+
 def render_slides(path: Path, output_dir: Path, slides: list[ParsedSlide]) -> tuple[list[Path], list[str]]:
     render_dir = output_dir / "renders"
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -250,23 +289,27 @@ def render_slides(path: Path, output_dir: Path, slides: list[ParsedSlide]) -> tu
             )
             pdf = Path(temp) / f"{path.stem}.pdf"
             if proc.returncode == 0 and pdf.exists():
-                prefix = render_dir / "slide"
+                prefix = Path(temp) / "slide"
                 rendered = subprocess.run(
-                    [pdftoppm, "-png", "-r", "220", str(pdf), str(prefix)],
+                    [pdftoppm, "-png", "-r", "160", str(pdf), str(prefix)],
                     capture_output=True,
                     text=True,
                     timeout=180,
                     check=False,
                 )
                 if rendered.returncode == 0:
-                    images = sorted(render_dir.glob("slide-*.png"))
+                    images = sorted(Path(temp).glob("slide-*.png"), key=_rendered_page_number)
                     if len(images) == len(slides):
-                        normalized: list[Path] = []
-                        for index, image in enumerate(images, 1):
-                            target = render_dir / f"slide-{index:04d}.png"
-                            image.replace(target)
-                            normalized.append(target)
-                        return normalized, warnings
+                        try:
+                            previews: list[Path] = []
+                            for index, image in enumerate(images, 1):
+                                preview_path = render_dir / f"slide-{index:04d}.webp"
+                                preview, _ = _write_webp_variants(image, preview_path)
+                                previews.append(preview)
+                            return previews, warnings
+                        except OSError:
+                            for generated in render_dir.glob("slide-*.webp"):
+                                generated.unlink(missing_ok=True)
             warnings.append("LibreOffice/Poppler rendering failed; generated structural SVG previews.")
     else:
         warnings.append("LibreOffice or Poppler unavailable; generated structural SVG previews.")

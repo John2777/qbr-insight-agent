@@ -23,6 +23,9 @@ DIMENSION_WEIGHTS = {
     "citation_precision": 0.08,
     "retrieval_hit": 0.10,
     "groundedness": 0.05,
+    "relevance": 0.08,
+    "answer_mode": 0.05,
+    "citation_economy": 0.02,
 }
 ABSTENTION_TERMS = ("没有足够证据", "证据不足", "未提供", "无法回答", "不能回答", "不可回答")
 
@@ -38,6 +41,14 @@ def group_coverage(answer: str, groups: list[list[str]]) -> float | None:
     folded = normalize(answer)
     hits = sum(any(normalize(alias) in folded for alias in group) for group in groups)
     return hits / len(groups)
+
+
+def forbidden_group_absence(answer: str, groups: list[list[str]]) -> float | None:
+    if not groups:
+        return None
+    folded = normalize(answer)
+    violations = sum(any(normalize(alias) in folded for alias in group) for group in groups)
+    return 1.0 - violations / len(groups)
 
 
 def ref_matches(actual: dict[str, Any], expected: dict[str, Any], document_key_by_id: dict[str, str]) -> bool:
@@ -65,9 +76,14 @@ def citation_precision(
     allowed: list[dict[str, Any]],
     document_key_by_id: dict[str, str],
     expected_abstention: bool,
+    policy: str = "required",
 ) -> float:
     if expected_abstention:
         return 1.0 if not citations else 0.0
+    if policy == "forbidden":
+        return 1.0 if not citations else 0.0
+    if policy == "optional" and not citations:
+        return 1.0
     if not citations:
         return 0.0
     return sum(any(ref_matches(citation, expected, document_key_by_id) for expected in allowed) for citation in citations) / len(citations)
@@ -172,17 +188,31 @@ def evaluate_case(
     abstained = any(term in answer for term in ABSTENTION_TERMS) or "INSUFFICIENT_EVIDENCE" in run.get("warnings", [])
 
     citation_recall_score = evidence_recall(citations, case.get("evidence_groups", []), reverse_ids)
+    citation_policy = str(case.get("citation_policy") or "required")
     citation_precision_score = citation_precision(
         citations,
         case.get("allowed_evidence", []),
         reverse_ids,
         expected_abstention,
+        citation_policy,
+    )
+    message = dict(run.get("message") or {})
+    message_metadata = dict(message.get("metadata") or {})
+    expected_answer_mode = case.get("expected_answer_mode")
+    answer_mode_score = float(message_metadata.get("answer_mode") == expected_answer_mode) if expected_answer_mode else None
+    max_citations = case.get("max_citations")
+    citation_economy = float(len(citations) <= int(max_citations)) if max_citations is not None else None
+    curated_grounding = (
+        message_metadata.get("knowledge_source") in {"curated_glossary", "curated_glossary+document"}
+        and expected_answer_mode == "term_definition"
     )
     groundedness = (
         1.0
         if expected_abstention and abstained and not citations
         else 0.0
         if expected_abstention
+        else 1.0
+        if curated_grounding
         else ((citation_recall_score or 0.0) + citation_precision_score) / 2
     )
     dimensions: dict[str, float | None] = {
@@ -192,6 +222,9 @@ def evaluate_case(
         "citation_precision": citation_precision_score,
         "retrieval_hit": evidence_recall(retrieval_refs, case.get("evidence_groups", []), reverse_ids),
         "groundedness": groundedness,
+        "relevance": forbidden_group_absence(answer, case.get("forbidden_groups", [])),
+        "answer_mode": answer_mode_score,
+        "citation_economy": citation_economy,
     }
     public_citations = [
         {
@@ -215,6 +248,7 @@ def evaluate_case(
         "system_answer": answer,
         "warnings": run.get("warnings", []),
         "model": run.get("model", {}),
+        "message_metadata": message_metadata,
         "latency_ms": elapsed_ms,
         "retrieval_strategy": retrieval.strategy,
         "retrieval_query": retrieval.query,
@@ -239,6 +273,16 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     scores = [result["score"] for result in results]
     dimension_scores = {name: round(statistics.fmean(values), 2) for name, values in sorted(dimension_values.items())}
     category_scores = {name: round(statistics.fmean(values), 2) for name, values in sorted(category_values.items())}
+    retrieval_to_citation_gap = (
+        round(dimension_scores["retrieval_hit"] - dimension_scores["citation_recall"], 2)
+        if "retrieval_hit" in dimension_scores and "citation_recall" in dimension_scores
+        else None
+    )
+    retrieval_to_content_gap = (
+        round(dimension_scores["retrieval_hit"] - dimension_scores["content_coverage"], 2)
+        if "retrieval_hit" in dimension_scores and "content_coverage" in dimension_scores
+        else None
+    )
     return {
         "case_count": len(results),
         "overall_score": round(statistics.fmean(scores), 2) if scores else 0.0,
@@ -248,8 +292,8 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         "dimension_scores": dimension_scores,
         "category_scores": category_scores,
         "diagnostics": {
-            "retrieval_to_citation_gap": round(dimension_scores.get("retrieval_hit", 0) - dimension_scores.get("citation_recall", 0), 2),
-            "retrieval_to_content_gap": round(dimension_scores.get("retrieval_hit", 0) - dimension_scores.get("content_coverage", 0), 2),
+            "retrieval_to_citation_gap": retrieval_to_citation_gap,
+            "retrieval_to_content_gap": retrieval_to_content_gap,
             "strongest_category": max(category_scores, key=category_scores.get) if category_scores else None,
             "weakest_category": min(category_scores, key=category_scores.get) if category_scores else None,
             "weakest_dimension": min(dimension_scores, key=dimension_scores.get) if dimension_scores else None,
@@ -285,6 +329,10 @@ def markdown_report(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Category scores", "", "| Category | Score |", "|---|---:|"])
     lines.extend(f"| {name} | {score:.2f} |" for name, score in summary["category_scores"].items())
     diagnostics = summary["diagnostics"]
+    citation_gap = diagnostics["retrieval_to_citation_gap"]
+    content_gap = diagnostics["retrieval_to_content_gap"]
+    citation_gap_text = "n/a" if citation_gap is None else f"{citation_gap:.2f} points"
+    content_gap_text = "n/a" if content_gap is None else f"{content_gap:.2f} points"
     lines.extend(
         [
             "",
@@ -292,8 +340,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
             "",
             f"- Strongest category: **{diagnostics['strongest_category']}**; weakest category: **{diagnostics['weakest_category']}**.",
             f"- Weakest quality dimension: **{diagnostics['weakest_dimension']}**.",
-            f"- Retrieval-to-citation gap: **{diagnostics['retrieval_to_citation_gap']:.2f} points**.",
-            f"- Retrieval-to-content gap: **{diagnostics['retrieval_to_content_gap']:.2f} points**.",
+            f"- Retrieval-to-citation gap: **{citation_gap_text}**.",
+            f"- Retrieval-to-content gap: **{content_gap_text}**.",
             "- A large positive gap means relevant evidence is often retrieved but is not selected, cited, "
             "or transformed into the requested answer.",
         ]
@@ -345,6 +393,8 @@ def main() -> None:
 
     project_root = Path(__file__).resolve().parent.parent
     dataset = json.loads((project_root / arguments.cases).read_text(encoding="utf-8"))
+    defaults = dict(dataset.get("case_defaults") or {})
+    dataset["cases"] = [{**defaults, **case} for case in dataset["cases"]]
     with tempfile.TemporaryDirectory(prefix="qbr-30-") as directory:
         service = create_service(
             Path(directory),

@@ -381,7 +381,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> FileResponse:
         path = service.preview_path(slide_id, principal.workspace_id)
         media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=300"})
+        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    @app.get("/api/v1/slides/{slide_id}/thumbnail")
+    def slide_thumbnail(
+        slide_id: str,
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[QBRService, Depends(_service)],
+    ) -> FileResponse:
+        path = service.thumbnail_path(slide_id, principal.workspace_id)
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.get("/api/v1/jobs/{job_id}")
     def job(

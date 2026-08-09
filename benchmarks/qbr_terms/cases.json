@@ -1,0 +1,271 @@
+{
+  "dataset": "qbr-terms",
+  "version": "1.0.0",
+  "language": "zh-CN",
+  "description": "QBR专业术语解释回归集，覆盖管理、财务、寿险、客户与销售运营术语。",
+  "source_decks": {},
+  "case_defaults": {
+    "category": "term_definition",
+    "scope": [],
+    "numeric_groups": [],
+    "evidence_groups": [],
+    "allowed_evidence": [],
+    "citation_policy": "optional",
+    "max_citations": 0,
+    "expected_answer_mode": "term_definition",
+    "forbidden_groups": [["根据文档中检索到的直接证据"], ["市场 |"], ["香港 |"]]
+  },
+  "cases": [
+    {
+      "id": "term-001", "term": "QBR", "question": "QBR是什么意思？请用业务语言解释。",
+      "standard_answer": "QBR是Quarterly Business Review，即季度业务回顾，用于复盘结果、差异、风险和后续行动。",
+      "fact_groups": [["quarterly business review", "季度业务回顾"], ["复盘"], ["风险", "行动"]]
+    },
+    {
+      "id": "term-002", "term": "KPI", "question": "KPI是什么含义？",
+      "standard_answer": "KPI是Key Performance Indicator，即关键绩效指标，用来衡量业务目标达成情况。",
+      "fact_groups": [["key performance indicator", "关键绩效指标"], ["衡量"], ["目标"]]
+    },
+    {
+      "id": "term-003", "term": "OKR", "question": "请解释OKR这个管理术语。",
+      "standard_answer": "OKR是Objectives and Key Results，即目标与关键结果，用目标说明方向、用关键结果衡量是否实现。",
+      "fact_groups": [["objectives and key results", "目标与关键结果"], ["目标"], ["关键结果"]]
+    },
+    {
+      "id": "term-004", "term": "YoY", "question": "YoY是什么意思，QBR里怎么看？",
+      "standard_answer": "YoY是Year over Year，即同比，把当前期间与上年同期比较。",
+      "fact_groups": [["year over year", "同比"], ["上年"], ["同期", "同一期间"]]
+    },
+    {
+      "id": "term-005", "term": "QoQ", "question": "QoQ是什么含义？和同比有什么不同？",
+      "standard_answer": "QoQ是Quarter over Quarter，即季度环比，把当前季度与上一季度比较；同比则比较上年同期。",
+      "fact_groups": [["quarter over quarter", "季度环比"], ["上一季度"], ["上年同期", "同比"]]
+    },
+    {
+      "id": "term-006", "term": "MoM", "question": "MoM指什么？",
+      "standard_answer": "MoM是Month over Month，即月度环比，把当前月份与上一个月份比较。",
+      "fact_groups": [["month over month", "月度环比"], ["当前月份"], ["上一个月"]]
+    },
+    {
+      "id": "term-007", "term": "YTD", "question": "YTD是什么意思？",
+      "standard_answer": "YTD是Year to Date，即年初至今，表示从年初累计到当前报告日。",
+      "fact_groups": [["year to date", "年初至今"], ["累计"], ["报告日"]]
+    },
+    {
+      "id": "term-008", "term": "MTD", "question": "解释一下MTD。",
+      "standard_answer": "MTD是Month to Date，即月初至今，表示从本月月初累计到当前报告日。",
+      "fact_groups": [["month to date", "月初至今"], ["本月"], ["累计"]]
+    },
+    {
+      "id": "term-009", "term": "FY", "question": "FY在QBR中是什么含义？",
+      "standard_answer": "FY是Fiscal Year，即财年，是企业财务报告和预算采用的年度期间，不一定等于自然年。",
+      "fact_groups": [["fiscal year", "财年"], ["财务报告", "预算"], ["自然年"]]
+    },
+    {
+      "id": "term-010", "term": "CY", "question": "CY是什么？",
+      "standard_answer": "CY是Calendar Year，即自然年，通常指1月1日至12月31日。",
+      "fact_groups": [["calendar year", "自然年"], ["1月", "一月"], ["12月", "十二月"]]
+    },
+    {
+      "id": "term-011", "term": "Actual", "question": "QBR里的Actual是什么意思？",
+      "standard_answer": "Actual指实际值，即报告期内已经发生并记录的业务或财务结果。",
+      "fact_groups": [["actual", "实际值"], ["已经发生", "已实现"], ["结果"]]
+    },
+    {
+      "id": "term-012", "term": "Budget", "question": "Budget在经营分析中指什么？",
+      "standard_answer": "Budget是预算，是计划周期开始前批准的资源配置和业绩目标基线。",
+      "fact_groups": [["budget", "预算"], ["资源配置"], ["目标", "基线"]]
+    },
+    {
+      "id": "term-013", "term": "Forecast", "question": "Forecast是什么含义？它和Budget有什么区别？",
+      "standard_answer": "Forecast是预测，会基于最新实际结果和假设滚动更新；Budget通常是预先批准的固定基线。",
+      "fact_groups": [["forecast", "预测"], ["滚动", "更新"], ["budget", "固定", "预算"]]
+    },
+    {
+      "id": "term-014", "term": "Variance", "question": "Variance在QBR里是什么意思？",
+      "standard_answer": "Variance是差异或偏差，表示实际、预算或预测之间的差额。",
+      "fact_groups": [["variance", "差异", "偏差"], ["实际"], ["预算", "预测"]]
+    },
+    {
+      "id": "term-015", "term": "Run Rate", "question": "Run Rate是什么，应该怎么理解？",
+      "standard_answer": "Run Rate是运行年化水平，把当前较短期间的业务速度外推为较长期间的参考，不等同于完整预测。",
+      "fact_groups": [["run rate", "运行年化"], ["外推"], ["不等同", "forecast", "预测"]]
+    },
+    {
+      "id": "term-016", "term": "CAGR", "question": "CAGR是什么含义？",
+      "standard_answer": "CAGR是Compound Annual Growth Rate，即复合年增长率，表示起点到终点按复利计算的年均增长速度。",
+      "fact_groups": [["compound annual growth rate", "复合年增长率"], ["复利"], ["年均增长"]]
+    },
+    {
+      "id": "term-017", "term": "Revenue", "question": "Revenue在QBR中是什么意思？",
+      "standard_answer": "Revenue是营业收入或营收，反映销售商品或提供服务取得的收入规模。",
+      "fact_groups": [["revenue", "营业收入", "营收"], ["销售", "服务"], ["规模"]]
+    },
+    {
+      "id": "term-018", "term": "Gross Margin", "question": "Gross Margin是什么？",
+      "standard_answer": "Gross Margin是毛利率，即毛利占营业收入的比例，反映直接成本后的盈利空间。",
+      "fact_groups": [["gross margin", "毛利率"], ["营业收入"], ["直接成本", "盈利空间"]]
+    },
+    {
+      "id": "term-019", "term": "Operating Margin", "question": "解释一下Operating Margin。",
+      "standard_answer": "Operating Margin是营业利润率，即营业利润占营业收入的比例，衡量核心经营盈利能力。",
+      "fact_groups": [["operating margin", "营业利润率"], ["营业利润"], ["营业收入", "盈利能力"]]
+    },
+    {
+      "id": "term-020", "term": "EBITDA", "question": "EBITDA全称是什么，代表什么？",
+      "standard_answer": "EBITDA是Earnings Before Interest, Taxes, Depreciation and Amortization，即息税折旧摊销前利润，用于观察经营获利能力，但不等于现金流。",
+      "fact_groups": [["earnings before interest", "息税折旧摊销前利润"], ["经营", "获利"], ["不等同", "现金流"]]
+    },
+    {
+      "id": "term-021", "term": "EBIT", "question": "EBIT是什么意思？和EBITDA怎么区分？",
+      "standard_answer": "EBIT是Earnings Before Interest and Taxes，即息税前利润；EBITDA还会加回折旧和摊销。",
+      "fact_groups": [["earnings before interest and taxes", "息税前利润"], ["ebitda"], ["折旧", "摊销"]]
+    },
+    {
+      "id": "term-022", "term": "OPEX", "question": "OPEX指什么？",
+      "standard_answer": "OPEX是Operating Expenditure，即运营费用，是维持日常经营发生的人员、租赁、营销等费用。",
+      "fact_groups": [["operating expenditure", "运营费用"], ["日常经营"], ["人员", "租赁", "营销"]]
+    },
+    {
+      "id": "term-023", "term": "CAPEX", "question": "CAPEX是什么含义？",
+      "standard_answer": "CAPEX是Capital Expenditure，即资本性支出，用于取得或改善长期资产。",
+      "fact_groups": [["capital expenditure", "资本性支出"], ["长期资产"], ["取得", "改善"]]
+    },
+    {
+      "id": "term-024", "term": "Free Cash Flow", "question": "Free Cash Flow怎么理解？",
+      "standard_answer": "Free Cash Flow是自由现金流，指维持经营和必要资本投入后可用于分配、偿债或再投资的现金。",
+      "fact_groups": [["free cash flow", "自由现金流"], ["资本投入"], ["分配", "偿债", "再投资"]]
+    },
+    {
+      "id": "term-025", "term": "Working Capital", "question": "Working Capital是什么？",
+      "standard_answer": "Working Capital是营运资金，通常指流动资产减流动负债，反映短期资金占用和偿付能力。",
+      "fact_groups": [["working capital", "营运资金"], ["流动资产"], ["流动负债", "偿付能力"]]
+    },
+    {
+      "id": "term-026", "term": "ROE", "question": "ROE是什么指标？",
+      "standard_answer": "ROE是Return on Equity，即净资产收益率，衡量利润相对于股东权益的回报。",
+      "fact_groups": [["return on equity", "净资产收益率"], ["利润"], ["股东权益", "回报"]]
+    },
+    {
+      "id": "term-027", "term": "Operating ROEV", "question": "Operating ROEV是什么含义？",
+      "standard_answer": "Operating ROEV是Operating Return on Embedded Value，即营运内含价值回报率，用于衡量保险经营活动相对于内含价值创造的回报。",
+      "fact_groups": [["operating return on embedded value", "营运内含价值回报率"], ["保险"], ["内含价值", "回报"]]
+    },
+    {
+      "id": "term-028", "term": "EV Equity", "question": "EV Equity是什么，和会计股东权益一样吗？",
+      "standard_answer": "EV Equity是Embedded Value Equity，即内含价值权益，综合现有净资产与有效保单未来价值；它不等同于会计股东权益或市值。",
+      "fact_groups": [["embedded value equity", "内含价值权益"], ["有效保单", "未来"], ["不等同", "股东权益", "市值"]]
+    },
+    {
+      "id": "term-029", "term": "ANP", "question": "ANP在寿险QBR里是什么意思？",
+      "standard_answer": "ANP是Annualised New Premium，即年化新保费，是将新业务保费按年化口径折算的规模指标。",
+      "fact_groups": [["annualised new premium", "年化新保费"], ["新业务保费"], ["规模"]]
+    },
+    {
+      "id": "term-030", "term": "APE", "question": "APE是什么含义？",
+      "standard_answer": "APE是Annual Premium Equivalent，即年化保费等值，通常把期缴新单年化保费与一定比例的一次性保费合并。",
+      "fact_groups": [["annual premium equivalent", "年化保费等值"], ["期缴"], ["一次性保费"]]
+    },
+    {
+      "id": "term-031", "term": "VONB", "question": "VONB是什么含义，解释一下。",
+      "standard_answer": "VONB是Value of New Business，即新业务价值，衡量一段期间新签业务预计为股东创造的未来价值；它不是保费收入或当期利润。",
+      "fact_groups": [["value of new business", "新业务价值"], ["新签业务", "新业务"], ["未来价值"], ["不是保费", "不等同"]],
+      "forbidden_groups": [["香港"], ["2,256", "2256"], ["中国内地"], ["市场 |"]]
+    },
+    {
+      "id": "term-032", "term": "VONB Margin", "question": "VONB Margin是什么指标？",
+      "standard_answer": "VONB Margin是Value of New Business Margin，即新业务价值率，表示新业务价值相对于新业务保费规模的比例。",
+      "fact_groups": [["value of new business margin", "新业务价值率"], ["新业务价值"], ["保费", "比例"]]
+    },
+    {
+      "id": "term-033", "term": "OPAT", "question": "OPAT全称和含义是什么？",
+      "standard_answer": "OPAT是Operating Profit After Tax，即税后营运利润，用于观察扣税后核心经营活动产生的盈利。",
+      "fact_groups": [["operating profit after tax", "税后营运利润", "税后营运溢利"], ["扣税", "税后"], ["经营", "盈利"]]
+    },
+    {
+      "id": "term-034", "term": "UFSG", "question": "UFSG是什么意思？",
+      "standard_answer": "UFSG是Underlying Free Surplus Generation，即基础自由盈余产生，衡量保险业务在基础经营口径下产生自由盈余的能力。",
+      "fact_groups": [["underlying free surplus generation", "基础自由盈余产生"], ["保险业务"], ["自由盈余"]]
+    },
+    {
+      "id": "term-035", "term": "Net FSG", "question": "Net FSG是什么含义？",
+      "standard_answer": "Net FSG是Net Free Surplus Generation，即净自由盈余产生，是考虑相关资本投入或调整项目后的净自由盈余变化。",
+      "fact_groups": [["net free surplus generation", "净自由盈余产生"], ["资本投入", "调整"], ["净自由盈余"]]
+    },
+    {
+      "id": "term-036", "term": "CER", "question": "CER口径是什么意思？",
+      "standard_answer": "CER是Constant Exchange Rates，即固定汇率口径，用固定汇率比较期间变化，以减少汇率波动影响。",
+      "fact_groups": [["constant exchange rates", "固定汇率口径"], ["比较"], ["汇率波动"]]
+    },
+    {
+      "id": "term-037", "term": "13M Persistency", "question": "13M Persistency或13M继续率是什么？",
+      "standard_answer": "13M Persistency是13个月继续率，衡量保单生效约13个月后仍保持有效或继续缴费的比例。",
+      "fact_groups": [["13-month persistency", "13个月继续率"], ["保单"], ["有效", "继续缴费"]]
+    },
+    {
+      "id": "term-038", "term": "Digital STP", "question": "Digital STP和数字直通率是什么意思？",
+      "standard_answer": "Digital STP是Digital Straight-Through Processing，即数字直通率，表示业务无需人工干预而由数字流程直通完成的比例。",
+      "fact_groups": [["digital straight-through processing", "数字直通率"], ["无需人工干预"], ["数字", "流程"]]
+    },
+    {
+      "id": "term-039", "term": "NPS", "question": "NPS是什么客户指标？",
+      "standard_answer": "NPS是Net Promoter Score，即净推荐值，通常以推荐者占比减去贬损者占比衡量客户推荐意愿。",
+      "fact_groups": [["net promoter score", "净推荐值"], ["推荐者"], ["贬损者", "推荐意愿"]]
+    },
+    {
+      "id": "term-040", "term": "Churn", "question": "Churn是什么意思？",
+      "standard_answer": "Churn是客户流失，表示客户停止续约、取消服务或不再活跃的现象及比例。",
+      "fact_groups": [["churn", "客户流失"], ["停止续约", "取消"], ["比例"]]
+    },
+    {
+      "id": "term-041", "term": "Retention", "question": "Retention在客户QBR里是什么？",
+      "standard_answer": "Retention是客户留存，表示客户在一定期间后仍继续使用、续约或保持有效关系的比例。",
+      "fact_groups": [["retention", "客户留存"], ["继续使用", "续约"], ["比例"]]
+    },
+    {
+      "id": "term-042", "term": "CAC", "question": "CAC是什么含义？",
+      "standard_answer": "CAC是Customer Acquisition Cost，即客户获取成本，表示为获得新增客户投入的销售和营销成本。",
+      "fact_groups": [["customer acquisition cost", "客户获取成本", "获客成本"], ["新增客户"], ["销售", "营销成本"]]
+    },
+    {
+      "id": "term-043", "term": "LTV", "question": "LTV是什么？为什么会和CAC一起看？",
+      "standard_answer": "LTV是Customer Lifetime Value，即客户生命周期价值；与CAC一起看可判断客户长期价值是否覆盖获客投入。",
+      "fact_groups": [["customer lifetime value", "客户生命周期价值"], ["cac"], ["获客投入", "经济性"]]
+    },
+    {
+      "id": "term-044", "term": "ARPU", "question": "ARPU是什么指标？",
+      "standard_answer": "ARPU是Average Revenue Per User，即每用户平均收入，通常用期间收入除以平均用户数。",
+      "fact_groups": [["average revenue per user", "每用户平均收入"], ["收入"], ["用户数"]]
+    },
+    {
+      "id": "term-045", "term": "ARR", "question": "ARR在订阅业务QBR中是什么意思？",
+      "standard_answer": "ARR是Annual Recurring Revenue，即年度经常性收入，表示订阅或合同的经常性收入年度规模，通常不含一次性收入。",
+      "fact_groups": [["annual recurring revenue", "年度经常性收入"], ["订阅", "合同"], ["一次性收入", "一次性实施费", "非经常性收入"]]
+    },
+    {
+      "id": "term-046", "term": "MRR", "question": "MRR是什么含义？",
+      "standard_answer": "MRR是Monthly Recurring Revenue，即月度经常性收入，表示订阅或合同每月产生的经常性收入。",
+      "fact_groups": [["monthly recurring revenue", "月度经常性收入"], ["每月", "一个月"], ["订阅", "合同"]]
+    },
+    {
+      "id": "term-047", "term": "Sales Pipeline", "question": "Sales Pipeline在QBR里指什么？",
+      "standard_answer": "Sales Pipeline是销售管道，是从线索、商机到成交的分阶段销售机会集合，用于管理未来收入和销售动作。",
+      "fact_groups": [["sales pipeline", "销售管道"], ["线索", "商机"], ["成交", "未来收入"]]
+    },
+    {
+      "id": "term-048", "term": "Win Rate", "question": "Win Rate是什么指标？",
+      "standard_answer": "Win Rate是赢单率，表示统计范围内销售机会最终成功成交的比例，计算时必须明确分母。",
+      "fact_groups": [["win rate", "赢单率"], ["成交"], ["比例", "分母"]]
+    },
+    {
+      "id": "term-049", "term": "Conversion Rate", "question": "Conversion Rate是什么意思？",
+      "standard_answer": "Conversion Rate是转化率，表示对象从流程一个阶段成功进入目标阶段的比例。",
+      "fact_groups": [["conversion rate", "转化率"], ["流程", "阶段"], ["比例"]]
+    },
+    {
+      "id": "term-050", "term": "Attainment", "question": "Attainment在销售QBR中是什么含义？",
+      "standard_answer": "Attainment是目标达成率，表示实际结果相对于目标值的完成比例。",
+      "fact_groups": [["attainment", "目标达成率"], ["实际结果"], ["目标", "完成比例"]]
+    }
+  ]
+}

@@ -157,21 +157,22 @@ function AnswerChart({ chart, citation, onCitation }: {
   </section>;
 }
 
-export function AssistantAnswer({ content, citations, onCitation }: {
+export function AssistantAnswer({ content, citations, onCitation, showVisuals = true }: {
   content: string;
   citations: Citation[];
   onCitation: (citation: Citation) => void;
+  showVisuals?: boolean;
 }) {
   const [slides, setSlides] = useState<SlideDetail[]>([]);
   useEffect(() => {
     let active = true;
-    const ids = [...new Set(citations.map((citation) => citation.slide_id))];
+    const ids = showVisuals ? [...new Set(citations.map((citation) => citation.slide_id))] : [];
     if (!ids.length) { setSlides([]); return () => { active = false; }; }
     Promise.all(ids.map((id) => api<SlideDetail>(`/api/v1/slides/${id}`)))
       .then((items) => { if (active) setSlides(items); })
       .catch(() => { if (active) setSlides([]); });
     return () => { active = false; };
-  }, [citations]);
+  }, [citations, showVisuals]);
 
   const charts = useMemo(() => slides.flatMap((slide) => slide.charts.map((chart) => ({ chart, slide })))
     .filter(({ chart }) => chart.series.some((series) => series.points.some((point) => point.y_value != null)))
@@ -185,7 +186,7 @@ export function AssistantAnswer({ content, citations, onCitation }: {
 
   return <div className="assistant-answer">
     <StructuredText content={content} citations={citations} onCitation={onCitation}/>
-    {(tables.length > 0 || charts.length > 0) && <div className="answer-visuals">
+    {showVisuals && (tables.length > 0 || charts.length > 0) && <div className="answer-visuals">
       {tables.map(({ rows, slide }) => {
         const source = citations.find((item) => item.slide_id === slide.id);
         return <section className="answer-visual-card" key={`table-${slide.id}`}>

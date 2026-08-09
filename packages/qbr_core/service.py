@@ -17,7 +17,7 @@ from .errors import Conflict, InvalidState, ResourceNotFound
 from .ids import new_id
 from .lease import LeaseCoordinator, LeasePolicy
 from .llm import EvidenceQAAgent
-from .parser import ParsedElement, ParsedPresentation, ParsedSlide, parse_presentation, render_slides
+from .parser import ParsedElement, ParsedPresentation, ParsedSlide, parse_presentation, render_slides, thumbnail_path_for
 from .purge import DocumentPurgeService
 from .qa_service import QAApplicationService
 from .retrieval import EvidenceRetriever
@@ -763,6 +763,7 @@ class QBRService:
     def _public_slide(self, item: dict[str, Any]) -> dict[str, Any]:
         if item.get("render_uri"):
             item["preview_url"] = f"/api/v1/slides/{item['id']}/preview"
+            item["thumbnail_url"] = f"/api/v1/slides/{item['id']}/thumbnail"
         item.pop("render_uri", None)
         return item
 
@@ -789,6 +790,11 @@ class QBRService:
         if not row or not Path(row["render_uri"]).is_file():
             raise ResourceNotFound("Slide preview not found")
         return Path(row["render_uri"])
+
+    def thumbnail_path(self, slide_id: str, workspace_id: str) -> Path:
+        preview_path = self.preview_path(slide_id, workspace_id)
+        thumbnail_path = thumbnail_path_for(preview_path)
+        return thumbnail_path if thumbnail_path.is_file() else preview_path
 
     def get_job(self, job_id: str, workspace_id: str) -> dict[str, Any]:
         with self.db.read() as conn:
