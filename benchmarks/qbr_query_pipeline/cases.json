@@ -218,6 +218,76 @@
       "required_query_terms": ["customer retention persistency", "fy2025"],
       "excluded_roles": ["methodology"],
       "hard_constraints": ["FY2025"]
+    },
+    {
+      "id": "plan-025",
+      "question": "公司的优势在哪些点上？",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "positive",
+      "expected_language": "zh",
+      "required_query_terms": ["strength advantage", "增长 价值 盈利", "继续率", "portfolio"],
+      "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-026",
+      "question": "What are the company's main strengths?",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "positive",
+      "expected_language": "en",
+      "required_query_terms": ["优势 亮点", "capital buffer", "persistency productivity"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-027",
+      "question": "What went well in this QBR?",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "positive",
+      "expected_language": "en",
+      "required_query_terms": ["record high momentum", "增长 动量 延续"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-028",
+      "question": "公司的优劣势分别是什么？",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "balanced",
+      "expected_language": "zh",
+      "required_query_terms": ["strength advantage", "绿色 达标"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-029",
+      "question": "下一阶段有哪些增长机会？",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "opportunity",
+      "expected_language": "zh",
+      "required_query_terms": ["competitive edge", "运营质量"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-030",
+      "question": "What are the company's weaknesses?",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "en",
+      "required_query_terms": ["deteriorating trend", "management concern"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-031",
+      "question": "公司的核心竞争力体现在哪里？",
+      "expected_intent": "business_evaluation",
+      "expected_evaluation_polarity": "positive",
+      "expected_language": "zh",
+      "required_query_terms": ["outperformance leading", "自由盈余", "diversified mix"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
     }
   ]
 }

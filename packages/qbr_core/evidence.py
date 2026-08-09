@@ -285,6 +285,31 @@ def extract_relevant_quote(content: str, plan: QueryPlan, *, chunk_type: str = "
 
 def infer_facet(content: str, plan: QueryPlan) -> str:
     folded = content.casefold()
+    if plan.intent == "business_evaluation":
+        if any(marker in folded for marker in ("cash", "capital", "fsg", "solvency", "现金", "资本", "自由盈余", "偿付")):
+            return "cash_capital"
+        if any(
+            marker in folded
+            for marker in ("persistency", "productivity", "retention", "stp", "quality", "继续率", "产能", "留存", "直通率", "质量")
+        ):
+            return "operating_quality"
+        if any(
+            marker in folded for marker in ("mix", "concentration", "diversif", "portfolio", "regional", "组合", "集中", "多元", "区域")
+        ):
+            return "portfolio_resilience"
+        if any(
+            marker in folded
+            for marker in ("target", "threshold", "priority", "execution", "green", "目标", "阈值", "优先", "执行", "绿色", "达标")
+        ):
+            return "execution_delivery"
+        if any(
+            marker in folded
+            for marker in ("profit", "earnings", "margin", "roe", "roev", "value", "vonb", "利润", "盈利", "回报", "价值", "价值率")
+        ):
+            return "profitability_value"
+        if any(marker in folded for marker in ("growth", "increase", "momentum", "record", "增长", "提升", "动量", "新高", "创纪录")):
+            return "growth_momentum"
+        return ""
     if plan.intent != "negative_signal_summary":
         return plan.required_facets[0] if plan.required_facets else "direct_answer"
     if any(marker in folded for marker in ("threshold", "limit", "warning", "breach", "阈值", "限额", "红色", "黄色", "预警")):
@@ -477,7 +502,7 @@ class EvidencePackBuilder:
                     rejected_quality["all_green_status_table"] = rejected_quality.get("all_green_status_table", 0) + 1
                     continue
             facet = infer_facet(content, plan)
-            if plan.intent == "negative_signal_summary" and not facet:
+            if plan.intent in {"business_evaluation", "negative_signal_summary"} and not facet:
                 continue
             quote = extract_relevant_quote(content, plan, chunk_type=str(row.get("chunk_type") or "text"))
             if not quote:

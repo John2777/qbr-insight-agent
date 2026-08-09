@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .db import Database
+from .evaluation_analysis import EvaluativeSignalAnalyzer
 from .evidence import EvidencePackBuilder
 from .negative_analysis import NegativeSignalAnalyzer
 from .query_planning import QueryPlan, RetrievalQuery, deterministic_plan
@@ -120,6 +121,7 @@ class DeterministicAnswerEngine:
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
         self.evidence_builder = EvidencePackBuilder()
+        self.evaluation_analyzer = EvaluativeSignalAnalyzer()
         self.negative_analyzer = NegativeSignalAnalyzer()
 
     def _scope_clause(self, document_ids: list[str]) -> tuple[str, list[Any]]:
@@ -282,6 +284,16 @@ class DeterministicAnswerEngine:
                 if (len(retry_pack.covered_facets), len(retry_pack.atoms)) > (len(pack.covered_facets), len(pack.atoms)):
                     pack = retry_pack
                     diagnostics["evidence_pack"] = pack.to_dict()
+            if plan.intent == "business_evaluation":
+                assessment = self.evaluation_analyzer.analyze(
+                    plan,
+                    explicit_pack=pack,
+                    chunks=scoped_chunks,
+                    chart_rows=chart_data,
+                )
+                diagnostics["evaluation_assessment"] = assessment.diagnostics
+                answer, evidence, assessment_warnings = assessment.render(plan)
+                return answer, evidence, list(dict.fromkeys([*plan.warnings, *assessment_warnings]))
             if plan.intent == "negative_signal_summary":
                 assessment = self.negative_analyzer.analyze(
                     plan,

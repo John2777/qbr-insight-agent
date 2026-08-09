@@ -63,7 +63,7 @@ def test_term_definition_run_persists_presentation_metadata(tmp_path: Path) -> N
     assert run["message"]["metadata"]["answer_mode"] == "term_definition"
     assert run["message"]["metadata"]["show_visuals"] is False
     assert run["message"]["metadata"]["knowledge_source"] == "curated_glossary"
-    assert run["message"]["metadata"]["pipeline_version"] == "planned-evidence-v1"
+    assert run["message"]["metadata"]["pipeline_version"] == "planned-evidence-v2"
     assert run["message"]["metadata"]["query_plan"]["intent"] == "term_definition"
     assert history["messages"][-1]["metadata"]["show_visuals"] is False
     assert run["model"]["status"] == "skipped_curated_glossary"

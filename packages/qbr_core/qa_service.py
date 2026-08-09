@@ -378,10 +378,11 @@ class QAApplicationService:
                     else "curated_glossary" if answer_mode == "term_definition"
                     else "document_evidence"
                 ),
-                "pipeline_version": "planned-evidence-v1",
+                "pipeline_version": "planned-evidence-v2",
                 "query_plan": plan.to_dict(),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
+                "evaluation_assessment": answer_result.diagnostics.get("evaluation_assessment", {}),
                 "negative_assessment": answer_result.diagnostics.get("negative_assessment", {}),
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)

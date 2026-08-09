@@ -378,6 +378,29 @@ class EvidenceRetriever:
                 "↑",
             )
             return role_bonus + min(3.0, sum(0.45 for marker in markers if marker in content))
+        if intent == "business_evaluation":
+            markers = (
+                "above",
+                "growth",
+                "improv",
+                "leading",
+                "momentum",
+                "outperform",
+                "record",
+                "strong",
+                "target",
+                "增长",
+                "提升",
+                "改善",
+                "领先",
+                "动量",
+                "新高",
+                "强劲",
+                "达标",
+                "绿色",
+                "多元",
+            )
+            return role_bonus + min(3.0, sum(0.4 for marker in markers if marker in content))
         if intent == "provenance":
             return 1.5 if role == "provenance" else role_bonus
         return role_bonus

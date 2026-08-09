@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.db import utc_now
+from packages.qbr_core.evaluation_analysis import EvaluativeSignalAnalyzer
 from packages.qbr_core.evidence import EvidencePack, EvidencePackBuilder, extract_relevant_quote
 from packages.qbr_core.negative_analysis import NegativeSignalAnalyzer
 from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
@@ -106,6 +107,91 @@ def _seed_pipeline_document(service: QBRService) -> str:
     return document_id
 
 
+def _seed_strength_document(service: QBRService) -> str:
+    now = utc_now()
+    document_id = "doc_strength"
+    version_id = "dv_strength"
+    parser_run_id = "run_strength"
+    chunks = (
+        (
+            "slide_growth",
+            1,
+            "Record growth",
+            "chunk_growth",
+            "text",
+            "Record value growth continued: VONB, profit and cash generation all improved, with momentum extending into Q1.",
+        ),
+        (
+            "slide_financials",
+            2,
+            "Financial data table",
+            "chunk_financials",
+            "table",
+            (
+                "Metric | 2024A | 2025A | Change | Unit\n"
+                "VONB | 4,712 | 5,516 | +15% CER | US$m\n"
+                "Net FSG | 4,020 | 4,451 | +14% per share | US$m\n"
+                "Shareholder capital ratio | 236% | 221% | -15ppt | %"
+            ),
+        ),
+        (
+            "slide_mix",
+            3,
+            "Portfolio gates",
+            "chunk_mix",
+            "table",
+            "Metric | Current | Threshold\nLargest market share | 41% | <45%\nPortfolio growth | +15% | >10%",
+        ),
+    )
+    with service.db.transaction(immediate=True) as conn:
+        conn.execute(
+            """INSERT INTO documents(
+                 id,workspace_id,title,status,metadata_json,deleted_at,created_by,created_at,updated_at
+               ) VALUES (?,?,?,'ready','{}',NULL,'user_demo',?,?)""",
+            (document_id, "ws_demo", "Strength QBR", now, now),
+        )
+        conn.execute(
+            """INSERT INTO document_versions(
+                 id,document_id,version_no,sha256,mime_type,size_bytes,original_uri,active_parser_run_id,created_at
+               ) VALUES (?,?,1,?,'application/vnd.openxmlformats-officedocument.presentationml.presentation',1,?,?,?)""",
+            (version_id, document_id, version_id, f"/{version_id}.pptx", parser_run_id, now),
+        )
+        conn.execute(
+            """INSERT INTO parser_runs(
+                 id,document_version_id,skill_name,skill_version,schema_version,status,quality_json,started_at,completed_at
+               ) VALUES (?,?,?,'1','1','ready','{}',?,?)""",
+            (parser_run_id, version_id, "test", now, now),
+        )
+        for slide_id, slide_no, title, chunk_id, chunk_type, content in chunks:
+            element_id = f"strength_element_{slide_no}"
+            conn.execute(
+                """INSERT INTO slides(
+                     id,parser_run_id,document_version_id,slide_no,title,summary,notes_text,
+                     width_emu,height_emu,render_uri,quality_score
+                   ) VALUES (?,?,?,?,?,?,NULL,1,1,NULL,1)""",
+                (slide_id, parser_run_id, version_id, slide_no, title, content),
+            )
+            conn.execute(
+                """INSERT INTO elements(
+                     id,slide_id,parent_id,element_type,reading_order,bbox_json,text_content,
+                     structured_json,provenance_json,confidence,review_status
+                   ) VALUES (?,?,NULL,?,1,'{}',?,'{}','{}',1,'accepted')""",
+                (element_id, slide_id, chunk_type, content),
+            )
+            conn.execute(
+                """INSERT INTO chunks(
+                     id,workspace_id,document_version_id,slide_id,element_id,chunk_type,
+                     content,metadata_json,content_hash,active
+                   ) VALUES (?,?,?,?,?,?,?,'{}',?,1)""",
+                (chunk_id, "ws_demo", version_id, slide_id, element_id, chunk_type, content, chunk_id),
+            )
+            conn.execute(
+                "INSERT INTO chunk_fts(chunk_id,workspace_id,content) VALUES (?,?,?)",
+                (chunk_id, "ws_demo", content),
+            )
+    return document_id
+
+
 def test_negative_question_plan_is_bilingual_and_excludes_source_notes() -> None:
     plan = deterministic_plan("what is the bad news in this ppt")
     queries = " ".join(item.text for item in plan.retrieval_queries).casefold()
@@ -116,6 +202,36 @@ def test_negative_question_plan_is_bilingual_and_excludes_source_notes() -> None
     assert "risk concentration" in queries
     assert "风险" in queries
     assert "provenance" in plan.excluded_content_roles
+
+
+def test_strength_question_plan_is_evaluative_bilingual_and_deep() -> None:
+    plan = deterministic_plan("公司的优势在哪些点上")
+    queries = " ".join(item.text for item in plan.retrieval_queries).casefold()
+
+    assert plan.intent == "business_evaluation"
+    assert plan.evaluation_polarity == "positive"
+    assert plan.execution_profile == "deep"
+    assert plan.retrieval_queries[0].text == "公司的优势在哪些点上"
+    assert "strength advantage" in queries
+    assert "增长 价值 盈利" in queries
+    assert "继续率" in queries
+    assert "portfolio" in queries
+    assert plan.required_facets == (
+        "growth_momentum",
+        "profitability_value",
+        "cash_capital",
+        "operating_quality",
+        "portfolio_resilience",
+        "execution_delivery",
+    )
+
+
+def test_balanced_and_opportunity_questions_keep_evaluation_polarity() -> None:
+    balanced = deterministic_plan("公司的优劣势分别是什么？")
+    opportunity = deterministic_plan("下一阶段有哪些增长机会？")
+
+    assert (balanced.intent, balanced.evaluation_polarity) == ("business_evaluation", "balanced")
+    assert (opportunity.intent, opportunity.evaluation_polarity) == ("business_evaluation", "opportunity")
 
 
 def test_exact_risk_table_question_is_not_misclassified_as_global_bad_news() -> None:
@@ -146,6 +262,29 @@ def test_model_planner_merges_expansions_without_losing_literal_query_or_constra
     assert plan.retrieval_queries[0].text == "How did sales perform in Q2 2025?"
     assert plan.hard_constraints == ("2025", "Q2")
     assert any("营收" in item.text for item in plan.retrieval_queries)
+
+
+def test_model_planner_can_promote_ambiguous_evaluative_question_with_polarity() -> None:
+    model = PlannerModel(
+        json.dumps(
+            {
+                "canonical_question": "company strengths supported by comparative evidence",
+                "intent": "business_evaluation",
+                "evaluation_polarity": "positive",
+                "retrieval_queries": [{"text": "record growth above target capital buffer", "kind": "evaluation_hypothesis"}],
+            }
+        )
+    )
+
+    plan = QueryPlannerAgent(model).plan("Where does the company stand out?")
+
+    assert plan.planner == "llm"
+    assert plan.intent == "business_evaluation"
+    assert plan.evaluation_polarity == "positive"
+    assert plan.execution_profile == "deep"
+    assert "growth_momentum" in plan.required_facets
+    assert plan.retrieval_queries[0].text == "Where does the company stand out?"
+    assert any("capital buffer" in item.text for item in plan.retrieval_queries)
 
 
 def test_planner_provider_failure_has_deterministic_fallback() -> None:
@@ -395,6 +534,132 @@ def test_negative_analyzer_distinguishes_no_adverse_signal_from_no_business_cont
     assert warnings == []
 
 
+def test_evaluative_analyzer_derives_strengths_and_balances_counterevidence() -> None:
+    plan = deterministic_plan("公司的优势在哪些点上")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "financial-table",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s2",
+            "slide_no": 2,
+            "element_id": "e2",
+            "chunk_type": "table",
+            "content": (
+                "核心财务指标 | 2024A | 2025A | 同比/变化 | 单位\n"
+                "VONB / 新业务价值 | 4,712 | 5,516 | +15% CER | US$m\n"
+                "Net FSG / 净自由盈余产生 | 4,020 | 4,451 | +14%/股 | US$m\n"
+                "Shareholder capital ratio | 236% | 221% | -15ppt | %"
+            ),
+        },
+        {
+            "id": "green-gates",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s3",
+            "slide_no": 3,
+            "element_id": "e3",
+            "chunk_type": "table",
+            "content": "指标 | 当前 | 阈值\n最大市场占比 | 41% | <45%\n组合增长 | +15% | >10%",
+        },
+    ]
+    categorical_chart = [
+        {
+            "series_id": "fy2024",
+            "series_name": "FY2024",
+            "point_order": 1,
+            "category": "Singapore",
+            "y_value": 380,
+            "document_version_id": "dv",
+            "slide_id": "s4",
+            "slide_no": 4,
+            "element_id": "e4",
+        },
+        {
+            "series_id": "fy2024",
+            "series_name": "FY2024",
+            "point_order": 2,
+            "category": "Other markets",
+            "y_value": 1072,
+            "document_version_id": "dv",
+            "slide_id": "s4",
+            "slide_no": 4,
+            "element_id": "e4",
+        },
+    ]
+
+    assessment = EvaluativeSignalAnalyzer().analyze(
+        plan,
+        explicit_pack=empty_pack,
+        chunks=chunks,
+        chart_rows=categorical_chart,
+    )
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert "公司的优势主要体现在" in answer
+    assert "VONB" in answer and "Net FSG" in answer
+    assert "最大市场占比" in answer
+    assert "Shareholder capital ratio" in answer and "需要平衡看待" in answer
+    assert "Singapore" not in answer and "Other markets" not in answer
+    assert {item["analysis_method"] for item in evidence} == {
+        "structured_table_improvement",
+        "structured_threshold_strength",
+        "structured_table_trend",
+    }
+    assert warnings == []
+
+
+def test_evaluative_analyzer_does_not_claim_strength_without_comparison_basis() -> None:
+    plan = deterministic_plan("What are the company's strengths?")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "descriptive",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s1",
+            "slide_no": 1,
+            "element_id": "e1",
+            "chunk_type": "text",
+            "content": "The company operates through agency and partnership channels across several markets.",
+        }
+    ]
+
+    assessment = EvaluativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert answer.startswith("The document contains business content")
+    assert "does not justify a company-strength claim" in answer
+    assert evidence == []
+    assert warnings == ["NO_COMPARATIVE_STRENGTH_EVIDENCE"]
+
+
+def test_evaluative_analyzer_turns_management_actions_into_evidenced_opportunities() -> None:
+    plan = deterministic_plan("下一阶段有哪些增长机会？")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "action",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s1",
+            "slide_no": 1,
+            "element_id": "e1",
+            "chunk_type": "text",
+            "content": "降低新业务资本强度，提升净FSG转化。",
+        }
+    ]
+
+    assessment = EvaluativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
+    answer, evidence, warnings = assessment.render(plan)
+
+    assert "可执行的改进或增长机会" in answer
+    assert "降低新业务资本强度" in answer
+    assert evidence[0]["analysis_method"] == "management_action_opportunity"
+    assert warnings == []
+
+
 def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_path: Path) -> None:
     service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
     document_id = _seed_pipeline_document(service)
@@ -414,9 +679,38 @@ def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_p
     assert "[Sources]" not in message["content"]
     assert "ImageGen" not in message["content"]
     assert message["metadata"]["query_plan"]["intent"] == "negative_signal_summary"
-    assert message["metadata"]["pipeline_version"] == "planned-evidence-v1"
+    assert message["metadata"]["pipeline_version"] == "planned-evidence-v2"
     assert message["metadata"]["negative_assessment"]["signal_count"] == 2
     assert {citation["slide_no"] for citation in message["citations"]} == {1, 2}
+
+
+def test_strength_question_runs_multiroute_retrieval_and_structured_evaluation(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_strength_document(service)
+    plan = deterministic_plan("公司的优势在哪些点上", [document_id])
+
+    retrieval = EvidenceRetriever(service.db).search_plan(plan, "ws_demo", [document_id])
+    assert retrieval.diagnostics["query_count"] > 1
+    assert retrieval.diagnostics["unique_candidates"] >= 2
+
+    conversation = service.create_conversation("ws_demo", "user_demo", [document_id])
+    queued = service.ask(conversation["id"], "公司的优势在哪些点上", "ws_demo", "user_demo")
+    service.process_next_run("strength-query-pipeline-test")
+    result = service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    message = next(item for item in result["messages"] if item["id"] == queued["assistant_message_id"])
+
+    assert "公司的优势主要体现在" in message["content"]
+    assert "VONB" in message["content"]
+    assert "Net FSG" in message["content"]
+    assert "Largest market share" in message["content"]
+    assert "Shareholder capital ratio" in message["content"]
+    assert "没有足够" not in message["content"]
+    assert message["metadata"]["query_plan"]["intent"] == "business_evaluation"
+    assert message["metadata"]["query_plan"]["evaluation_polarity"] == "positive"
+    assert message["metadata"]["pipeline_version"] == "planned-evidence-v2"
+    assert message["metadata"]["evaluation_assessment"]["signal_count"] >= 3
+    assert message["metadata"]["evaluation_assessment"]["caveat_count"] == 1
+    assert {citation["slide_no"] for citation in message["citations"]} >= {1, 2, 3}
 
 
 def test_query_planning_benchmark_contract() -> None:
@@ -428,6 +722,8 @@ def test_query_planning_benchmark_contract() -> None:
         plan = deterministic_plan(case["question"])
         query_corpus = " ".join(item.text for item in plan.retrieval_queries).casefold()
         assert plan.intent == case["expected_intent"], case["id"]
+        if "expected_evaluation_polarity" in case:
+            assert plan.evaluation_polarity == case["expected_evaluation_polarity"], case["id"]
         assert plan.answer_language == case["expected_language"], case["id"]
         assert plan.retrieval_queries[0].text == case["question"], case["id"]
         assert all(term.casefold() in query_corpus for term in case.get("required_query_terms", [])), case["id"]
