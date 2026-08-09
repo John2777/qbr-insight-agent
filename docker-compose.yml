@@ -73,7 +73,7 @@ services:
       context: .
       dockerfile: deploy/docker/web.Dockerfile
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
     depends_on:
       api:
         condition: service_healthy
