@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, statusLabel } from "../api";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { SlideCanvas } from "../components/SlideCanvas";
@@ -9,11 +9,14 @@ type DocumentDetail = DocumentItem & { versions: Array<{ id: string; active_pars
 
 export function DocumentDetailPage() {
   const { documentId } = useParams();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [document, setDocument] = useState<DocumentDetail | null>(null);
   const [slides, setSlides] = useState<SlideItem[]>([]);
   const [current, setCurrent] = useState<SlideDetail | null>(null);
   const [tab, setTab] = useState<"content" | "charts" | "notes">("content");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => { if (!documentId) return; api<DocumentDetail>(`/api/v1/documents/${documentId}`).then(setDocument); }, [documentId]);
   useEffect(() => {
@@ -25,12 +28,36 @@ export function DocumentDetailPage() {
   }, [document, params]);
 
   function choose(slide: SlideItem) { setParams({ slide: String(slide.slide_no) }); api<SlideDetail>(`/api/v1/slides/${slide.id}`).then(setCurrent); }
+
+  async function purge() {
+    if (!document || deleting) return;
+    const confirmed = window.confirm(
+      `彻底删除「${document.title}」？\n\n这会删除原始 PPT、解析结果、检索索引，以及所有引用或以该 PPT 为范围的问答记录。此操作不可恢复。`
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const result = await api<{ status: "completed" | "partial" }>(`/api/v1/documents/${document.id}/purge`, { method: "DELETE" });
+      if (result.status !== "completed") {
+        throw new Error("数据库已清理，但文件或向量索引尚未完全清理；请再次点击重试。");
+      }
+      navigate("/documents", { replace: true });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "删除失败，请重试");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (!document) return <div className="loading">正在加载文档…</div>;
-  if (!document.versions[0]?.active_parser_run_id) return <section className="page"><Link to="/documents">← 返回文档库</Link><div className="processing-card"><div className="spinner"/><h2>{statusLabel(document.status)}</h2><p>解析完成后，本页会显示幻灯片和结构化图表。</p></div></section>;
+  const header = <header className="detail-header"><div><Link to="/documents" className="back">← 文档库</Link><h1>{document.title}</h1></div><div className="detail-actions">{document.versions[0]?.active_parser_run_id && <Link className="primary-button" to={`/chat?document=${document.id}`}>基于此文档提问</Link>}<button className="danger-button" disabled={deleting} onClick={() => void purge()}>{deleting ? "正在彻底删除…" : "彻底删除"}</button></div></header>;
+  if (!document.versions[0]?.active_parser_run_id) return <section className="detail-page">{header}{deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}<div className="processing-card"><div className="spinner"/><h2>{statusLabel(document.status)}</h2><p>解析完成后，本页会显示幻灯片和结构化图表。</p></div></section>;
 
   return (
     <section className="detail-page">
-      <header className="detail-header"><div><Link to="/documents" className="back">← 文档库</Link><h1>{document.title}</h1></div><Link className="primary-button" to={`/chat?document=${document.id}`}>基于此文档提问</Link></header>
+      {header}
+      {deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}
       <div className="detail-grid">
         <aside className="slide-nav" aria-label="幻灯片列表">{slides.map((slide) => <button key={slide.id} onClick={() => choose(slide)} className={current?.id === slide.id ? "active" : ""}><span>{slide.slide_no}</span><img src={slide.preview_url} alt=""/><small>{slide.title || "无标题"}</small></button>)}</aside>
         <div className="preview-pane">{current && <><div className="preview-toolbar"><strong>第 {current.slide_no} 页</strong><span>质量 {Math.round(current.quality_score * 100)}%</span></div><SlideCanvas slide={current}/></>}</div>
@@ -44,4 +71,3 @@ export function DocumentDetailPage() {
     </section>
   );
 }
-

@@ -17,7 +17,15 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "viewer": {"read", "ask", "feedback"},
     "editor": {"read", "ask", "feedback", "document:write"},
     "reviewer": {"read", "ask", "feedback", "review:write"},
-    "admin": {"read", "ask", "feedback", "document:write", "review:write", "analytics:read"},
+    "admin": {
+        "read",
+        "ask",
+        "feedback",
+        "document:write",
+        "document:purge",
+        "review:write",
+        "analytics:read",
+    },
 }
 
 

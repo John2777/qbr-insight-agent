@@ -64,3 +64,88 @@ def test_cross_workspace_ids_are_not_enumerable(tmp_path: Path, synthetic_pptx: 
         )
     assert response.status_code == 404
     assert response.json()["code"] == "RESOURCE_NOT_FOUND"
+
+
+def test_document_purge_removes_derived_data_and_is_idempotent(tmp_path: Path, synthetic_pptx: Path) -> None:
+    settings = Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with synthetic_pptx.open("rb") as source:
+            uploaded = client.post(
+                "/api/v1/documents",
+                files={
+                    "file": (
+                        "purge-me.pptx",
+                        source,
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    )
+                },
+            ).json()
+        assert app.state.service.process_next_job("purge-test-worker") == uploaded["job"]["id"]
+
+        conversation = client.post(
+            "/api/v1/conversations",
+            json={"title": "Delete this conversation", "document_ids": [uploaded["document"]["id"]]},
+        ).json()
+        sent = client.post(
+            f"/api/v1/conversations/{conversation['id']}/messages",
+            json={"content": "Q2 Revenue 是多少？"},
+        ).json()
+        assert app.state.service.process_next_run("purge-test-worker") == sent["run_id"]
+        assert client.post(
+            f"/api/v1/messages/{sent['assistant_message_id']}/feedback",
+            json={"rating": 1, "category": "accurate", "comment": "temporary"},
+        ).status_code == 201
+
+        version_dir = settings.object_dir / "ws_demo" / uploaded["version"]["id"]
+        assert version_dir.is_dir()
+        first = client.delete(f"/api/v1/documents/{uploaded['document']['id']}/purge")
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "completed"
+        assert first.json()["already_purged"] is False
+        assert not version_dir.exists()
+
+        second = client.delete(f"/api/v1/documents/{uploaded['document']['id']}/purge")
+        assert second.status_code == 200, second.text
+        assert second.json()["status"] == "completed"
+        assert second.json()["already_purged"] is True
+        assert client.get(f"/api/v1/documents/{uploaded['document']['id']}").status_code == 404
+        assert client.get(f"/api/v1/conversations/{conversation['id']}").status_code == 404
+
+        with app.state.service.db.read() as conn:
+            emptied_tables = (
+                "documents",
+                "document_versions",
+                "parser_runs",
+                "ingestion_jobs",
+                "job_events",
+                "slides",
+                "elements",
+                "charts",
+                "chart_series",
+                "chart_points",
+                "chunks",
+                "chunk_fts",
+                "chunk_embeddings",
+                "review_tasks",
+                "review_revisions",
+                "conversations",
+                "messages",
+                "runs",
+                "run_events",
+                "citations",
+                "feedback",
+            )
+            assert {table: conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in emptied_tables} == {
+                table: 0 for table in emptied_tables
+            }
+            purge = conn.execute(
+                "SELECT status,version_ids_json FROM document_purges WHERE workspace_id='ws_demo' AND document_id=?",
+                (uploaded["document"]["id"],),
+            ).fetchone()
+            assert purge["status"] == "completed"
+            assert purge["version_ids_json"] == "[]"
+            assert conn.execute(
+                "SELECT count(*) FROM audit_events WHERE action='document.purge' AND target_id=?",
+                (uploaded["document"]["id"],),
+            ).fetchone()[0] == 1

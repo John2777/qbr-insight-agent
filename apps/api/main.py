@@ -348,6 +348,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service.delete_document(document_id, principal.workspace_id, principal.user_id)
         return Response(status_code=204)
 
+    @app.delete("/api/v1/documents/{document_id}/purge")
+    def purge_document(
+        document_id: str,
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[QBRService, Depends(_service)],
+    ) -> dict[str, Any]:
+        principal.require("document:purge")
+        return service.purge_document(document_id, principal.workspace_id, principal.user_id)
+
     @app.get("/api/v1/document-versions/{version_id}/slides")
     def slides(
         version_id: str,

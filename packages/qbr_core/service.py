@@ -18,6 +18,7 @@ from .ids import new_id
 from .lease import LeaseCoordinator, LeasePolicy
 from .llm import EvidenceQAAgent
 from .parser import ParsedElement, ParsedPresentation, ParsedSlide, parse_presentation, render_slides
+from .purge import DocumentPurgeService
 from .qa_service import QAApplicationService
 from .retrieval import EvidenceRetriever
 from .security import OOXML_MIME, inspect_pptx
@@ -94,6 +95,7 @@ class QBRService:
             lexical_weight=settings.retrieval_lexical_weight,
             vector_weight=settings.retrieval_vector_weight,
         )
+        self.document_purges = DocumentPurgeService(settings, self.db, self.retriever.rebuild_workspace)
         self.qa_agent = EvidenceQAAgent(settings) if settings.llm_configured else None
         self.qa_service = QAApplicationService(
             settings=settings,
@@ -278,6 +280,9 @@ class QBRService:
             raise ResourceNotFound("Job not found")
         if row["status"] not in {"running", "pending"}:
             raise InvalidState(f"Job is {row['status']}")
+        if self.document_purges.is_requested(str(row["document_id"])):
+            self.document_purges.discard_version_objects(str(row["workspace_id"]), str(row["version_id"]))
+            return
         parser_run_id = new_id("pr")
         output_dir = self.settings.object_dir / row["workspace_id"] / row["version_id"] / parser_run_id
         now = utc_now()
@@ -314,8 +319,14 @@ class QBRService:
             if self._cancel_requested(job_id):
                 self._finish_cancelled(job_id, row["document_id"], parser_run_id)
                 return
+            if self.document_purges.is_requested(str(row["document_id"])):
+                self.document_purges.discard_version_objects(str(row["workspace_id"]), str(row["version_id"]))
+                return
             self._persist_parsed(job_id, row, parser_run_id, parsed, renders, render_warnings)
         except Exception as exc:
+            if self.document_purges.is_requested(str(row["document_id"])):
+                self.document_purges.discard_version_objects(str(row["workspace_id"]), str(row["version_id"]))
+                return
             with self.db.transaction(immediate=True) as conn:
                 attempts = int(conn.execute("SELECT attempts FROM ingestion_jobs WHERE id=?", (job_id,)).fetchone()[0])
                 retrying = attempts < self.settings.job_max_attempts
@@ -875,6 +886,9 @@ class QBRService:
             self.retriever.rebuild_workspace(workspace_id)
         except Exception:
             logger.warning("Vector index rebuild failed after document deletion", exc_info=True)
+
+    def purge_document(self, document_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        return self.document_purges.purge(document_id, workspace_id, user_id)
 
     def list_reviews(self, workspace_id: str) -> list[dict[str, Any]]:
         with self.db.read() as conn:

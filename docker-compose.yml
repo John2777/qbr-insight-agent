@@ -15,6 +15,7 @@ x-backend-service: &backend-service
     SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
     LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
     LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-300}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     QBR_DATA_DIR: /data
     DATABASE_PATH: /data/sqlite/app.sqlite3
     OBJECT_STORE_PATH: /data/objects

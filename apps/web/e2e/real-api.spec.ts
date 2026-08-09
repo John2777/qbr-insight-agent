@@ -39,7 +39,7 @@ function createSyntheticPresentation(outputPath: string) {
   );
 }
 
-test("real browser uploads, dynamically loads the parser, and renders a cited answer", async ({ page }, testInfo) => {
+test("real browser uploads, answers with citations, and purges one presentation", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const fixturePath = testInfo.outputPath("synthetic-qbr.pptx");
   createSyntheticPresentation(fixturePath);
@@ -77,4 +77,18 @@ test("real browser uploads, dynamically loads the parser, and renders a cited an
   await expect(citation).toBeVisible();
   await citation.click();
   await expect(page.locator(".evidence-pane")).toContainText("第 1 页");
+
+  await page.goto(`/documents/${uploaded.document.id}`);
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("此操作不可恢复");
+    await dialog.accept();
+  });
+  const purgeResponsePromise = page.waitForResponse(
+    (response) => response.url().includes(`/api/v1/documents/${uploaded.document.id}/purge`)
+      && response.request().method() === "DELETE"
+  );
+  await page.getByRole("button", { name: "彻底删除" }).click();
+  expect((await purgeResponsePromise).status()).toBe(200);
+  await expect(page).toHaveURL(/\/documents$/);
+  await expect(page.locator(`a[href="/documents/${uploaded.document.id}"]`)).toHaveCount(0);
 });

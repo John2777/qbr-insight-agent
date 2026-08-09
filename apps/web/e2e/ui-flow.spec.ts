@@ -30,12 +30,17 @@ test("queued answer is rendered from the SSE stream", async ({ page }) => {
       body: 'event: status\nid: 1\ndata: {"message":"正在检索"}\n\nevent: answer_delta\nid: 2\ndata: {"delta":"Q2 Revenue 为 20。 [1]"}\n\nevent: completed\nid: 3\ndata: {}\n\n'
     });
   });
-  await page.route("**/api/v1/conversations/conv_1", (route) => route.fulfill({ json: { id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, messages: complete ? [{ id: "msg_1", role: "assistant", content: "Q2 Revenue 为 20。 [1]", status: "completed", citations: [] }] : [] } }));
+  await page.route("**/api/v1/conversations/conv_1", (route) => route.fulfill({ json: { id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, messages: complete ? [
+    { id: "msg_user_1", role: "user", content: "Q2 Revenue 是多少？", status: "completed", citations: [] },
+    { id: "msg_1", role: "assistant", content: "Q2 Revenue 为 20。 [1]", status: "completed", citations: [] }
+  ] : [] } }));
 
   await page.goto("/chat?document=doc_1");
   await page.getByLabel("问题").fill("Q2 Revenue 是多少？");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("Q2 Revenue 为 20。 [1]")).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制提问" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
 });
 
 test("analytics page exposes quality metrics", async ({ page }) => {

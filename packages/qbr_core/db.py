@@ -11,7 +11,7 @@ from typing import Any
 
 from .ids import new_id
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def utc_now() -> str:
@@ -149,6 +149,12 @@ CREATE TABLE IF NOT EXISTS feedback (
   id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id), user_id TEXT NOT NULL REFERENCES users(id),
   rating INTEGER NOT NULL CHECK(rating IN (-1, 1)), category TEXT, comment TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS document_purges (
+  workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, requested_by TEXT NOT NULL,
+  version_ids_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL,
+  result_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  completed_at TEXT, PRIMARY KEY (workspace_id, document_id)
+);
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, actor_id TEXT NOT NULL, action TEXT NOT NULL,
   target_type TEXT NOT NULL, target_id TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL
@@ -258,6 +264,14 @@ class Database:
         conn.execute(
             """CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_workspace
                ON chunk_embeddings(workspace_id, model, dimensions)"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS document_purges (
+                 workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, requested_by TEXT NOT NULL,
+                 version_ids_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL,
+                 result_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                 completed_at TEXT, PRIMARY KEY (workspace_id, document_id)
+               )"""
         )
         Database._repair_table_chunks(conn)
 

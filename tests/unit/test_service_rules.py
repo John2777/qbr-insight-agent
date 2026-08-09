@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from packages.qbr_core import QBRService, Settings
@@ -99,3 +102,78 @@ def test_pending_job_can_be_cancelled_and_retried(tmp_path: Path, synthetic_pptx
     assert service.retry_job(job_id, "ws_demo")["status"] == "pending"
     assert service.process_next_job() == job_id
     assert service.get_job(job_id, "ws_demo")["status"] in {"ready", "partial"}
+
+
+def test_purge_retry_resumes_after_index_cleanup_failure(tmp_path: Path, synthetic_pptx: Path) -> None:
+    service = service_at(tmp_path)
+    uploaded = service.import_document(
+        synthetic_pptx,
+        filename="qbr.pptx",
+        title="QBR",
+        metadata={},
+        deduplication="new_version",
+        workspace_id="ws_demo",
+        user_id="user_demo",
+    )
+    attempts = 0
+
+    def flaky_rebuild(workspace_id: str) -> None:
+        nonlocal attempts
+        assert workspace_id == "ws_demo"
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary index failure")
+
+    service.document_purges.rebuild_workspace_index = flaky_rebuild
+    first = service.purge_document(uploaded["document"]["id"], "ws_demo", "user_demo")
+    assert first["status"] == "partial"
+    assert first["already_purged"] is False
+
+    second = service.purge_document(uploaded["document"]["id"], "ws_demo", "user_demo")
+    assert second["status"] == "completed"
+    assert second["resumed"] is True
+    assert attempts == 2
+
+    third = service.purge_document(uploaded["document"]["id"], "ws_demo", "user_demo")
+    assert third["status"] == "completed"
+    assert third["already_purged"] is True
+    assert attempts == 2
+
+
+def test_concurrent_purge_requests_execute_external_cleanup_once(tmp_path: Path, synthetic_pptx: Path) -> None:
+    service = service_at(tmp_path)
+    uploaded = service.import_document(
+        synthetic_pptx,
+        filename="qbr.pptx",
+        title="QBR",
+        metadata={},
+        deduplication="new_version",
+        workspace_id="ws_demo",
+        user_id="user_demo",
+    )
+    attempts = 0
+    attempts_lock = threading.Lock()
+
+    def counted_rebuild(workspace_id: str) -> None:
+        nonlocal attempts
+        assert workspace_id == "ws_demo"
+        with attempts_lock:
+            attempts += 1
+        time.sleep(0.1)
+
+    service.document_purges.rebuild_workspace_index = counted_rebuild
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                service.purge_document,
+                uploaded["document"]["id"],
+                "ws_demo",
+                "user_demo",
+            )
+            for _ in range(2)
+        ]
+    results = [future.result() for future in futures]
+
+    assert attempts == 1
+    assert sorted(result["already_purged"] for result in results) == [False, True]
+    assert {result["status"] for result in results} == {"completed"}
