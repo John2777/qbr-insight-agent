@@ -205,6 +205,19 @@ def test_negative_question_plan_is_bilingual_and_excludes_source_notes() -> None
     assert "provenance" in plan.excluded_content_roles
 
 
+def test_execution_risk_explanation_has_dedicated_intent_and_retrieval_routes() -> None:
+    plan = deterministic_plan("所谓的执行风险具体是指什么？")
+    queries = " ".join(item.text for item in plan.retrieval_queries).casefold()
+
+    assert plan.intent == "risk_explanation"
+    assert plan.execution_profile == "deep"
+    assert plan.answer_language == "zh"
+    assert "execution risk" in queries
+    assert "风险闸门" in queries
+    assert "优先事项" in queries
+    assert "provenance" in plan.excluded_content_roles
+
+
 def test_strength_question_plan_is_evaluative_bilingual_and_deep() -> None:
     plan = deterministic_plan("公司的优势在哪些点上")
     queries = " ".join(item.text for item in plan.retrieval_queries).casefold()
@@ -489,6 +502,74 @@ def test_negative_analyzer_derives_trends_and_distinguishes_green_gates() -> Non
     assert warnings == []
 
 
+def test_execution_risk_explanation_synthesizes_definition_signals_and_gate_boundary() -> None:
+    plan = deterministic_plan("所谓的执行风险具体是指什么？")
+    empty_pack = EvidencePack((), (), plan.required_facets, False)
+    chunks = [
+        {
+            "id": "capital-trend",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s2",
+            "slide_no": 2,
+            "element_id": "e2",
+            "chunk_type": "table",
+            "content": "Metric | 2024A | 2025A | Change\nShareholder capital ratio | 236% | 221% | -15ppt",
+        },
+        {
+            "id": "risk-gates",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s5",
+            "slide_no": 5,
+            "element_id": "e5",
+            "chunk_type": "table",
+            "content": "风险闸门 | 绿 | 黄 | 红 | 当前\n资本比率 | >210% | 190-210% | <190% | 221%",
+        },
+        {
+            "id": "management-action",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s6",
+            "slide_no": 6,
+            "element_id": "e6",
+            "chunk_type": "text",
+            "content": "强化高净值、保障与跨境服务，控制产品集中度。",
+        },
+    ]
+    chart_rows = [
+        {
+            "series_id": "persistency",
+            "series_name": "Persistency 13M",
+            "point_order": point_order,
+            "category": period,
+            "y_value": value,
+            "display_value": f"{value}%",
+            "document_version_id": "dv",
+            "document_id": "doc",
+            "slide_id": "s3",
+            "slide_no": 3,
+            "element_id": "execution-chart",
+            "chart_title": "Monthly execution indicators",
+        }
+        for point_order, period, value in ((1, "26/02", 90.8), (2, "26/03", 89.4))
+    ]
+
+    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=chart_rows)
+    answer, evidence, warnings = assessment.render_explanation(plan)
+
+    assert "## 直接解释" in answer
+    assert "既定经营目标和优先事项在落地过程中偏离计划" in answer
+    assert "## 在这份 PPT 中的具体表现" in answer
+    assert "Persistency 13M" in answer
+    assert "控制产品集中度" in answer
+    assert "## 如何判断是否升级为实际问题" in answer
+    assert "绿色也不等于未来没有风险" in answer
+    assert "24/10=55.5" not in answer
+    assert any(item.get("element_id") == "execution-chart" for item in evidence)
+    assert warnings == []
+
+
 def test_negative_analyzer_reports_no_red_flags_instead_of_insufficient_evidence() -> None:
     plan = deterministic_plan("what is the bad news in this ppt")
     empty_pack = EvidencePack((), (), plan.required_facets, False)
@@ -688,6 +769,25 @@ def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_p
     assert message["metadata"]["pipeline_version"] == "planned-evidence-v2"
     assert message["metadata"]["negative_assessment"]["signal_count"] == 2
     assert {citation["slide_no"] for citation in message["citations"]} == {1, 2}
+
+
+def test_execution_risk_question_returns_explanation_not_retrieval_dump(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_pipeline_document(service)
+    conversation = service.create_conversation("ws_demo", "user_demo", [document_id])
+    queued = service.ask(conversation["id"], "所谓的执行风险具体是指什么？", "ws_demo", "user_demo")
+
+    service.process_next_run("execution-risk-explanation-test")
+    result = service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    message = next(item for item in result["messages"] if item["id"] == queued["assistant_message_id"])
+
+    assert message["metadata"]["query_plan"]["intent"] == "risk_explanation"
+    assert "## 直接解释" in message["content"]
+    assert "既定经营目标和优先事项在落地过程中偏离计划" in message["content"]
+    assert "Risk concentration" in message["content"]
+    assert "与问题直接相关的文档证据如下" not in message["content"]
+    assert "illustrative synthetic test data" not in message["content"]
+    assert message["metadata"]["negative_assessment"]["signal_count"] >= 1
 
 
 def test_strength_question_runs_multiroute_retrieval_and_structured_evaluation(tmp_path: Path) -> None:

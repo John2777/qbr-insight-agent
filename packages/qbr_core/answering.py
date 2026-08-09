@@ -294,7 +294,7 @@ class DeterministicAnswerEngine:
                 diagnostics["evaluation_assessment"] = assessment.diagnostics
                 answer, evidence, assessment_warnings = assessment.render(plan)
                 return answer, evidence, list(dict.fromkeys([*plan.warnings, *assessment_warnings]))
-            if plan.intent == "negative_signal_summary":
+            if plan.intent in {"negative_signal_summary", "risk_explanation"}:
                 assessment = self.negative_analyzer.analyze(
                     plan,
                     explicit_pack=pack,
@@ -302,7 +302,10 @@ class DeterministicAnswerEngine:
                     chart_rows=chart_data,
                 )
                 diagnostics["negative_assessment"] = assessment.diagnostics
-                answer, evidence, assessment_warnings = assessment.render(plan)
+                if plan.intent == "risk_explanation":
+                    answer, evidence, assessment_warnings = assessment.render_explanation(plan)
+                else:
+                    answer, evidence, assessment_warnings = assessment.render(plan)
                 return answer, evidence, list(dict.fromkeys([*plan.warnings, *assessment_warnings]))
             warnings = list(plan.warnings)
             if not pack.answerable:

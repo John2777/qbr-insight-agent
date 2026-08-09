@@ -354,7 +354,7 @@ class EvidenceRetriever:
             "methodology": -0.8,
             "boilerplate": -1.5,
         }.get(role, 0.0)
-        if intent == "negative_signal_summary":
+        if intent in {"negative_signal_summary", "risk_explanation"}:
             markers = (
                 "risk",
                 "concern",

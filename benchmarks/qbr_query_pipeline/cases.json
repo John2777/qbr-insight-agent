@@ -288,6 +288,15 @@
       "required_query_terms": ["outperformance leading", "自由盈余", "diversified mix"],
       "excluded_roles": ["methodology"],
       "hard_constraints": []
+    },
+    {
+      "id": "plan-032",
+      "question": "所谓的执行风险具体是指什么？",
+      "expected_intent": "risk_explanation",
+      "expected_language": "zh",
+      "required_query_terms": ["execution risk", "风险闸门", "优先事项"],
+      "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
     }
   ]
 }

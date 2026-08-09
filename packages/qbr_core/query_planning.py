@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 INTENTS = {
     "term_definition",
+    "risk_explanation",
     "business_evaluation",
     "negative_signal_summary",
     "summary",
@@ -93,6 +94,22 @@ NEGATIVE_TOPIC_MARKERS = (
     "下滑",
     "恶化",
     "未达标",
+)
+
+RISK_EXPLANATION_MARKERS = (
+    "是指什么",
+    "指的是什么",
+    "具体指什么",
+    "具体是指",
+    "什么意思",
+    "什么含义",
+    "如何理解",
+    "怎么理解",
+    "解释一下",
+    "what does",
+    "what is meant by",
+    "what is the meaning of",
+    "explain",
 )
 
 POSITIVE_EVALUATION_MARKERS = (
@@ -265,6 +282,20 @@ def _is_negative_summary(question: str) -> bool:
     return has_topic and has_broad_scope
 
 
+def _is_risk_explanation(question: str) -> bool:
+    """Recognize questions asking what a document risk concept means, not which risks exist."""
+    folded = question.casefold()
+    has_risk = any(marker in folded for marker in ("risk", "风险"))
+    if not has_risk:
+        return False
+    if any(marker in folded for marker in RISK_EXPLANATION_MARKERS):
+        return True
+    return bool(
+        re.search(r"(?:什么是|何谓|所谓的|这里的|文档中的).{0,24}风险", question)
+        or re.search(r"\bwhat\s+is\s+(?:the\s+)?[a-z][a-z -]{1,30}\s+risk\b", folded)
+    )
+
+
 def _evaluation_polarity(question: str) -> str:
     folded = question.casefold()
     if any(marker in folded for marker in BALANCED_EVALUATION_MARKERS):
@@ -280,6 +311,8 @@ def _intent(question: str) -> str:
     if find_term(question) is not None:
         return "term_definition"
     folded = question.casefold()
+    if _is_risk_explanation(question):
+        return "risk_explanation"
     if _evaluation_polarity(question) != "neutral":
         return "business_evaluation"
     if _is_negative_summary(question):
@@ -300,7 +333,7 @@ def _intent(question: str) -> str:
 def _profile(intent: str) -> str:
     if intent == "term_definition":
         return "fast"
-    if intent in {"business_evaluation", "negative_signal_summary", "summary"}:
+    if intent in {"risk_explanation", "business_evaluation", "negative_signal_summary", "summary"}:
         return "deep"
     if intent in {"chart_analysis", "table_analysis", "provenance"}:
         return "analytical"
@@ -308,6 +341,14 @@ def _profile(intent: str) -> str:
 
 
 def _facets(intent: str) -> tuple[str, ...]:
+    if intent == "risk_explanation":
+        return (
+            "explicit_negative_statements",
+            "deteriorating_metrics",
+            "threshold_pressure",
+            "risk_concentration",
+            "management_concerns",
+        )
     if intent == "business_evaluation":
         return (
             "growth_momentum",
@@ -361,7 +402,54 @@ def _dedupe_queries(items: Iterable[RetrievalQuery], *, limit: int = 8) -> tuple
 
 def _deterministic_queries(question: str, intent: str) -> tuple[RetrievalQuery, ...]:
     queries = [RetrievalQuery("q1", question, "literal", 1.35)]
-    if intent == "business_evaluation":
+    if intent == "risk_explanation":
+        execution_specific = any(
+            marker in question.casefold()
+            for marker in ("execution", "implementation", "delivery", "执行", "落地", "交付", "实施")
+        )
+        queries.extend(
+            (
+                RetrievalQuery(
+                    "",
+                    (
+                        "execution risk implementation delivery slippage priority owner dependency mitigation"
+                        if execution_specific
+                        else "risk definition driver exposure indicator threshold impact mitigation"
+                    ),
+                    "concept_semantic",
+                    1.2,
+                ),
+                RetrievalQuery(
+                    "",
+                    (
+                        "执行风险 落地风险 交付风险 优先事项 责任人 依赖项 缓解措施"
+                        if execution_specific
+                        else "风险 定义 驱动因素 暴露 指标 阈值 影响 缓解措施"
+                    ),
+                    "concept_cross_language",
+                    1.2,
+                ),
+                RetrievalQuery(
+                    "",
+                    "risk gate threshold target variance concentration limit warning red amber green",
+                    "measurement_semantic",
+                    1.1,
+                ),
+                RetrievalQuery(
+                    "",
+                    "风险闸门 阈值 目标 偏差 集中度 限额 预警 红灯 黄灯 绿灯",
+                    "measurement_cross_language",
+                    1.1,
+                ),
+                RetrievalQuery(
+                    "",
+                    "management action next quarter agenda control reduce repair optimize",
+                    "management_response",
+                    1.0,
+                ),
+            )
+        )
+    elif intent == "business_evaluation":
         queries.extend(
             (
                 RetrievalQuery(
@@ -476,7 +564,7 @@ PLANNER_SYSTEM_PROMPT = """You are the query-planning component of an enterprise
 Your only job is to turn a user question into retrieval hypotheses. Do not answer the question and do not invent facts.
 Return one JSON object with: canonical_question, intent, evaluation_polarity, retrieval_queries.
 intent must be one of: term_definition, business_evaluation, negative_signal_summary, summary, provenance,
-chart_analysis, table_analysis, evidence_answer.
+risk_explanation, chart_analysis, table_analysis, evidence_answer.
 evaluation_polarity must be one of: neutral, positive, negative, balanced, opportunity.
 retrieval_queries must contain 1-5 objects with text and kind. Preserve every year, quarter, market, metric and document constraint.
 Always keep queries short. Add bilingual Chinese/English variants when they improve retrieval.

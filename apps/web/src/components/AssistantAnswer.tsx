@@ -109,11 +109,20 @@ function tableRows(element: ElementItem): string[][] | null {
   return rows.map((row) => row.map((cell) => String(cell)));
 }
 
-function chartScore(chart: Chart): number {
+function chartScore(chart: Chart, citations: Citation[]): number {
   const label = `${chart.title ?? ""} ${chart.series.map((series) => series.name ?? "").join(" ")}`.toLowerCase();
+  const directlyCited = citations.some((citation) => citation.element_id === chart.element_id) ? 1_000 : 0;
+  const citationText = citations
+    .filter((citation) => citation.slide_id && citation.quote)
+    .map((citation) => citation.quote.toLowerCase());
+  const evidenceOverlap = citationText.some((quote) =>
+    [chart.title, ...chart.series.map((series) => series.name)]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .some((value) => quote.includes(value.toLowerCase()))
+  ) ? 100 : 0;
   const relevance = ["核心", "财务", "价值", "收入", "营收", "利润", "revenue", "profit", "value"]
     .filter((term) => label.includes(term)).length * 10;
-  return relevance + Math.min(chart.series.length, 6) + Math.min(chart.series[0]?.points.length ?? 0, 12);
+  return directlyCited + evidenceOverlap + relevance + Math.min(chart.series.length, 6) + Math.min(chart.series[0]?.points.length ?? 0, 12);
 }
 
 function AnswerChart({ chart, citation, onCitation }: {
@@ -123,6 +132,10 @@ function AnswerChart({ chart, citation, onCitation }: {
 }) {
   const labels = chart.series[0]?.points.map((point, index) => point.category ?? String(index + 1)) ?? [];
   const hasPercentage = chart.series.some((series) => series.points.some((point) => point.display_value?.includes("%")));
+  const percentageValues = chart.series.flatMap((series) => series.points)
+    .filter((point) => point.display_value?.includes("%") && point.y_value != null)
+    .map((point) => Math.abs(point.y_value as number));
+  const percentageIsFraction = percentageValues.length > 0 && Math.max(...percentageValues) <= 1.5;
   const datasets = chart.series.slice(0, 6).map((series, index) => {
     const percentage = series.points.some((point) => point.display_value?.includes("%"));
     return {
@@ -147,7 +160,7 @@ function AnswerChart({ chart, citation, onCitation }: {
     },
     scales: {
       value: { beginAtZero: true, grid: { color: "#e9edf2" } },
-      ...(hasPercentage ? { percentage: { beginAtZero: true, position: "right" as const, grid: { drawOnChartArea: false }, ticks: { callback: (value: string | number) => `${Number(value) * 100}%` } } } : {})
+      ...(hasPercentage ? { percentage: { beginAtZero: true, position: "right" as const, grid: { drawOnChartArea: false }, ticks: { callback: (value: string | number) => `${Number(value) * (percentageIsFraction ? 100 : 1)}%` } } } : {})
     }
   };
   const useLine = chart.chart_types.some((type) => type.toLowerCase().includes("line")) || labels.length > 6;
@@ -168,15 +181,16 @@ export function AssistantAnswer({ content, citations, onCitation, showVisuals = 
     let active = true;
     const ids = showVisuals ? [...new Set(citations.map((citation) => citation.slide_id))] : [];
     if (!ids.length) { setSlides([]); return () => { active = false; }; }
-    Promise.all(ids.map((id) => api<SlideDetail>(`/api/v1/slides/${id}`)))
-      .then((items) => { if (active) setSlides(items); })
-      .catch(() => { if (active) setSlides([]); });
+    Promise.allSettled(ids.map((id) => api<SlideDetail>(`/api/v1/slides/${id}`)))
+      .then((results) => {
+        if (active) setSlides(results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
+      });
     return () => { active = false; };
   }, [citations, showVisuals]);
 
   const charts = useMemo(() => slides.flatMap((slide) => slide.charts.map((chart) => ({ chart, slide })))
     .filter(({ chart }) => chart.series.some((series) => series.points.some((point) => point.y_value != null)))
-    .sort((left, right) => chartScore(right.chart) - chartScore(left.chart)).slice(0, 1), [slides]);
+    .sort((left, right) => chartScore(right.chart, citations) - chartScore(left.chart, citations)).slice(0, 1), [citations, slides]);
   const tables = useMemo(() => slides.flatMap((slide) => slide.elements.map((element) => ({ rows: tableRows(element), slide })))
     .filter((item): item is { rows: string[][]; slide: SlideDetail } => Boolean(item.rows?.length))
     .sort((left, right) => {
