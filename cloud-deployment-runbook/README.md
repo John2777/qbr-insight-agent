@@ -491,7 +491,7 @@ AWS 使用 CloudWatch + CloudTrail；阿里云使用云监控 + SLS + ActionTrai
 |---|---|
 | `502 Bad Gateway` | `systemctl status qbr-api`、端口 8000、Nginx error log |
 | 前端刷新后 404 | Nginx 是否有 `try_files ... /index.html` |
-| 上传返回 413 | Nginx `client_max_body_size` 与 `MAX_UPLOAD_MIB` 是否一致 |
+| 上传返回 413 | `/api/` 的 Nginx 是否设置 `client_max_body_size 11m;`（10 MiB 文件还包含 multipart 开销）；修改容器配置后是否重建了 `web` 镜像 |
 | PPT 只有结构化 SVG | `libreoffice --version`、`pdftoppm -v`、字体和 worker 日志 |
 | worker 不消费任务 | `RUN_INLINE_WORKER=false`、`qbr-worker` 状态、数据库目录权限 |
 | SQLite busy | 是否误开多实例/多 worker、是否有长事务、数据盘延迟和空间 |

@@ -3,6 +3,15 @@ import { Link } from "react-router-dom";
 import { api, statusLabel, uploadPresentation } from "../api";
 import type { DocumentItem } from "../types";
 
+export const MAX_UPLOAD_MIB = 10;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MIB * 1024 * 1024;
+
+export function validatePresentationFile(file: Pick<File, "name" | "size">): string {
+  if (!file.name.toLowerCase().endsWith(".pptx")) return "请选择 .pptx 文件";
+  if (file.size > MAX_UPLOAD_BYTES) return `文件不能超过 ${MAX_UPLOAD_MIB} MiB`;
+  return "";
+}
+
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -15,7 +24,8 @@ export function DocumentsPage() {
   async function selectFile(file?: File) {
     if (!file) return;
     setError("");
-    if (!file.name.toLowerCase().endsWith(".pptx")) { setError("请选择 .pptx 文件"); return; }
+    const validationError = validatePresentationFile(file);
+    if (validationError) { setError(validationError); return; }
     setUploading(true);
     try { await uploadPresentation(file); await load(); }
     catch (err) { setError(err instanceof Error ? err.message : "上传失败"); }
@@ -29,7 +39,7 @@ export function DocumentsPage() {
     <section className="page">
       <header className="page-header"><div><span className="eyebrow">KNOWLEDGE BASE</span><h1>季度业务文档</h1><p>上传演示文稿，精确解析图表源数据并建立可追溯证据。</p></div></header>
       <button className="upload-zone" onClick={() => inputRef.current?.click()} onDrop={drop} onDragOver={(e) => e.preventDefault()} disabled={uploading}>
-        <span className="upload-icon">↑</span><strong>{uploading ? "正在安全上传…" : "拖放 PPTX 到这里"}</strong><small>或点击选择文件 · 最大 100 MiB · 宏与外部内容会被拒绝</small>
+        <span className="upload-icon">↑</span><strong>{uploading ? "正在安全上传…" : "拖放 PPTX 到这里"}</strong><small>或点击选择文件 · 最大 {MAX_UPLOAD_MIB} MiB · 宏与外部内容会被拒绝</small>
         <input ref={inputRef} type="file" accept=".pptx" onChange={change} hidden />
       </button>
       {error && <div className="alert error" role="alert">{error}</div>}
@@ -50,4 +60,3 @@ export function DocumentsPage() {
     </section>
   );
 }
-

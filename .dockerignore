@@ -1,3 +1,7 @@
+.codex
+.idea
+.tmp_qbr
+.agents/skills/graphify
 .env
 awskey
 output

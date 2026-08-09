@@ -26,7 +26,7 @@ class Settings:
     data_dir: Path
     database_path: Path
     object_dir: Path
-    max_upload_mib: int = 100
+    max_upload_mib: int = 10
     max_slides: int = 200
     run_inline_worker: bool = True
     worker_poll_seconds: float = 1.0
@@ -95,7 +95,7 @@ class Settings:
             data_dir=data_dir,
             database_path=database_path,
             object_dir=object_dir,
-            max_upload_mib=int(os.getenv("MAX_UPLOAD_MIB", "100")),
+            max_upload_mib=int(os.getenv("MAX_UPLOAD_MIB", "10")),
             max_slides=int(os.getenv("MAX_SLIDES", "200")),
             run_inline_worker=_bool_env("RUN_INLINE_WORKER", True),
             worker_poll_seconds=float(os.getenv("WORKER_POLL_SECONDS", "1")),

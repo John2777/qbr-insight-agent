@@ -20,6 +20,7 @@ x-backend-service: &backend-service
     OBJECT_STORE_PATH: /data/objects
     VECTOR_INDEX_DIR: /data/vector_indexes
     RUN_INLINE_WORKER: "false"
+    MAX_UPLOAD_MIB: ${MAX_UPLOAD_MIB:-10}
     LLM_ENABLED: ${LLM_ENABLED:-false}
     LLM_PROVIDER: ${LLM_PROVIDER:-openai-compatible}
     LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
