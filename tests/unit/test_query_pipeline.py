@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage
+from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.db import utc_now
@@ -287,12 +288,17 @@ def test_model_planner_can_promote_ambiguous_evaluative_question_with_polarity()
     assert any("capital buffer" in item.text for item in plan.retrieval_queries)
 
 
-def test_planner_provider_failure_has_deterministic_fallback() -> None:
-    plan = QueryPlannerAgent(PlannerModel(RuntimeError("offline"))).plan("主要风险是什么？")
+def test_planner_provider_failure_has_deterministic_fallback(caplog: LogCaptureFixture) -> None:
+    plan = QueryPlannerAgent(PlannerModel(RuntimeError("offline")), provider="test-provider", model_name="test-model").plan(
+        "主要风险是什么？",
+        run_id="run_planner_failure",
+    )
 
     assert plan.intent == "negative_signal_summary"
     assert plan.planner == "deterministic_fallback"
     assert plan.warnings == ("QUERY_PLANNER_PROVIDER_ERROR",)
+    assert '"component":"query_planner"' in caplog.text
+    assert '"run_id":"run_planner_failure"' in caplog.text
 
 
 def test_query_terms_remove_question_scaffolding() -> None:

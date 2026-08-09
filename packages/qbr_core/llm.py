@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
@@ -9,7 +10,10 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
+from .observability import log_provider_failure
 from .verification import ClaimEvidenceVerifier
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是 QBR Insight Agent，一个受控的企业文档证据问答助手。
 
@@ -30,6 +34,7 @@ SYSTEM_PROMPT = """你是 QBR Insight Agent，一个受控的企业文档证据�
 
 
 class QAState(TypedDict, total=False):
+    run_id: str
     question: str
     deterministic_answer: str
     evidence: list[dict[str, Any]]
@@ -102,10 +107,12 @@ class EvidenceQAAgent:
         history: list[dict[str, str]],
         answer_mode: str = "evidence_answer",
         query_plan: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> LLMAnswer:
         result = self.graph.invoke(
             {
                 "question": question,
+                "run_id": run_id or "",
                 "deterministic_answer": deterministic_answer,
                 "evidence": evidence,
                 "history": history[-6:],
@@ -145,6 +152,16 @@ class EvidenceQAAgent:
         try:
             message = self.model.invoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)])
         except Exception as exc:  # provider SDK has a broad, versioned exception hierarchy
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            diagnostics = log_provider_failure(
+                logger,
+                component="answer_generation",
+                exc=exc,
+                provider=self.settings.llm_provider,
+                model=self.model_name,
+                run_id=state.get("run_id") or None,
+                latency_ms=latency_ms,
+            )
             return {
                 "candidate_answer": "",
                 "warnings": ["LLM_PROVIDER_ERROR"],
@@ -152,8 +169,8 @@ class EvidenceQAAgent:
                     "provider": self.settings.llm_provider,
                     "model": self.model_name,
                     "status": "fallback",
-                    "error_type": type(exc).__name__,
-                    "latency_ms": round((time.perf_counter() - started) * 1000),
+                    **diagnostics,
+                    "latency_ms": latency_ms,
                 },
             }
         usage = getattr(message, "usage_metadata", None) or {}

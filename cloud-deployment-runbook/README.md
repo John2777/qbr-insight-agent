@@ -437,6 +437,59 @@ du -sh /data/qbr/objects /data/qbr/backups
 sqlite3 /data/qbr/app.sqlite3 'PRAGMA quick_check;'
 ```
 
+问答和模型调用默认由 `qbr-worker` 执行，因此排查 Analytics 中的降级提示时先看 worker。新版本会输出
+`provider_call_failed` 和 `answer_run_completed_with_signals` 两类 JSON 事件，并携带 `run_id`、组件、模型、
+HTTP 状态码（若 SDK 提供）和耗时；不会记录问题正文、证据原文或 API Key。
+
+systemd 部署可直接执行：
+
+```bash
+sudo journalctl -u qbr-worker --since '30 minutes ago' -o cat
+sudo journalctl -u qbr-worker -f -o cat
+sudo journalctl -u qbr-worker --since today -o cat | grep -E 'provider_call_failed|QUERY_PLANNER_PROVIDER_ERROR|LLM_PROVIDER_ERROR'
+```
+
+拿到 Analytics/API 返回的 `run_id` 后，可精确过滤一次问答：
+
+```bash
+sudo journalctl -u qbr-worker --since today -o cat | grep 'run_abc123'
+```
+
+若实际使用仓库根目录的 Docker Compose，则服务名为 `api`、`worker`、`web`：
+
+```bash
+docker compose ps
+docker compose logs --since 30m --tail 500 worker api
+docker compose logs -f worker api
+docker compose logs --since 24h worker | grep -E 'provider_call_failed|QUERY_PLANNER_PROVIDER_ERROR|LLM_PROVIDER_ERROR'
+```
+
+先检查生效配置，不要输出 Key 本身：
+
+```bash
+curl --fail http://127.0.0.1:8000/health/ready | jq '.llm'
+sudo grep -E '^(LLM_ENABLED|LLM_PROVIDER|LLM_BASE_URL|LLM_MODEL|PLANNER_MODEL|LLM_TIMEOUT_SECONDS)=' /etc/qbr/runtime.env
+sudo sh -c 'grep -q "^LLM_API_KEY=." /etc/qbr/runtime.env && echo "LLM_API_KEY is set" || echo "LLM_API_KEY is missing"'
+```
+
+Compose 部署可用下面的等价检查：
+
+```bash
+docker compose exec worker sh -lc 'env | grep -E "^(LLM_ENABLED|LLM_PROVIDER|LLM_BASE_URL|LLM_MODEL|PLANNER_MODEL|LLM_TIMEOUT_SECONDS)="'
+docker compose exec worker sh -lc 'test -n "$LLM_API_KEY" && echo "LLM_API_KEY is set" || echo "LLM_API_KEY is missing"'
+```
+
+若 EC2 已安装 CloudWatch Agent，先发现实际日志组，再跟踪日志（不要假设日志组名称）：
+
+```bash
+aws logs describe-log-groups --query 'logGroups[].logGroupName' --output table
+aws logs tail '/your/qbr/log-group' --since 30m --follow
+```
+
+`401/403` 通常检查 Key、模型权限和 endpoint；`404` 检查 `LLM_BASE_URL`/模型名；`429` 检查配额与限流；
+超时或连接错误检查 EC2 出网、DNS、安全组/NACL 和 `LLM_TIMEOUT_SECONDS`。修改 `/etc/qbr/runtime.env` 后需执行
+`sudo systemctl restart qbr-api qbr-worker`；修改 Compose `.env` 后执行 `docker compose up -d --force-recreate api worker`。
+
 日志里若出现 PPT 原文、完整问题/回答、签名 URL、token 或 Key，应视为安全事件处理。
 
 ## 11. 监控和告警

@@ -24,6 +24,7 @@ from .qa_service import QAApplicationService
 from .query_planning import QueryPlannerAgent
 from .rerank import create_reranker
 from .retrieval import EvidenceRetriever
+from .run_warnings import warning_codes_by_severity, warning_details
 from .security import OOXML_MIME, inspect_pptx
 from .skill_registry import (
     NATIVE_CHART_CAPABILITY,
@@ -117,7 +118,11 @@ class QBRService:
                 if settings.planner_model and settings.planner_model != settings.llm_model
                 else self.qa_agent.model
             )
-        self.query_planner = QueryPlannerAgent(planner_model)
+        self.query_planner = QueryPlannerAgent(
+            planner_model,
+            provider=settings.llm_provider if planner_model is not None else None,
+            model_name=(settings.planner_model or settings.llm_model) if planner_model is not None else None,
+        )
         self.vision_enricher = create_vision_enricher(settings)
         self.qa_service = QAApplicationService(
             settings=settings,
@@ -1137,6 +1142,8 @@ class QBRService:
         return next(item for item in self.list_reviews(workspace_id) if item["id"] == review_id)
 
     def analytics_summary(self, workspace_id: str) -> dict[str, Any]:
+        degraded_patterns = [f"%{code}%" for code in warning_codes_by_severity("degraded")]
+        degraded_predicate = " OR ".join("warning_json LIKE ?" for _ in degraded_patterns) or "0"
         with self.db.read() as conn:
             document_rows = conn.execute(
                 """SELECT status,count(*) count FROM documents
@@ -1144,14 +1151,15 @@ class QBRService:
                 (workspace_id,),
             ).fetchall()
             run_row = conn.execute(
-                """SELECT count(*) total,
+                f"""SELECT count(*) total,
                      sum(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
                      sum(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,
                      sum(CASE WHEN warning_json LIKE '%INSUFFICIENT_EVIDENCE%' THEN 1 ELSE 0 END) no_evidence,
+                     sum(CASE WHEN ({degraded_predicate}) THEN 1 ELSE 0 END) degraded,
                      avg(CASE WHEN completed_at IS NOT NULL
                        THEN (julianday(completed_at)-julianday(created_at))*86400000 END) avg_latency_ms
                    FROM runs WHERE workspace_id=?""",
-                (workspace_id,),
+                (*degraded_patterns, workspace_id),
             ).fetchone()
             review_rows = conn.execute(
                 "SELECT status,count(*) count FROM review_tasks WHERE workspace_id=? GROUP BY status",
@@ -1177,6 +1185,7 @@ class QBRService:
                 "completed": int(run_row["completed"] or 0),
                 "failed": int(run_row["failed"] or 0),
                 "no_evidence": int(run_row["no_evidence"] or 0),
+                "degraded": int(run_row["degraded"] or 0),
                 "avg_latency_ms": round(float(run_row["avg_latency_ms"] or 0), 1),
             },
             "reviews": {row["status"]: row["count"] for row in review_rows},
@@ -1185,7 +1194,11 @@ class QBRService:
                 "positive_rate": round(int(feedback_row["positive"] or 0) / feedback_total, 3) if feedback_total else None,
             },
             "recent_runs": [
-                {**{key: value for key, value in dict(row).items() if key != "warning_json"}, "warnings": _loads(row["warning_json"], [])}
+                {
+                    **{key: value for key, value in dict(row).items() if key != "warning_json"},
+                    "warnings": (warnings := _loads(row["warning_json"], [])),
+                    "warning_details": warning_details(warnings),
+                }
                 for row in recent
             ],
         }

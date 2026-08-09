@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -8,7 +9,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from .observability import log_provider_failure
 from .terminology import find_term
+
+logger = logging.getLogger(__name__)
 
 INTENTS = {
     "term_definition",
@@ -504,8 +508,10 @@ def _json_object(text: str) -> dict[str, Any] | None:
 class QueryPlannerAgent:
     """Always-on planner with an LLM expansion path and a safe deterministic fallback."""
 
-    def __init__(self, model: Any | None = None) -> None:
+    def __init__(self, model: Any | None = None, *, provider: str | None = None, model_name: str | None = None) -> None:
         self.model = model
+        self.provider = provider
+        self.model_name = model_name
 
     def plan(
         self,
@@ -514,6 +520,7 @@ class QueryPlannerAgent:
         history: Iterable[dict[str, str]] = (),
         document_ids: Iterable[str] = (),
         document_vocabulary: Iterable[str] = (),
+        run_id: str | None = None,
     ) -> QueryPlan:
         baseline = deterministic_plan(question, document_ids)
         if self.model is None:
@@ -532,11 +539,19 @@ class QueryPlannerAgent:
             message = self.model.invoke([SystemMessage(content=PLANNER_SYSTEM_PROMPT), HumanMessage(content=prompt)])
             payload = _json_object(_message_text(message))
         except Exception as exc:  # planner failure must not take down evidence QA
+            diagnostics = log_provider_failure(
+                logger,
+                component="query_planner",
+                exc=exc,
+                provider=self.provider,
+                model=self.model_name or getattr(self.model, "model_name", None) or getattr(self.model, "model", None),
+                run_id=run_id,
+            )
             return replace(
                 baseline,
                 planner="deterministic_fallback",
                 warnings=("QUERY_PLANNER_PROVIDER_ERROR",),
-                diagnostics={"error_type": type(exc).__name__},
+                diagnostics=diagnostics,
             )
         if payload is None:
             return replace(baseline, planner="deterministic_fallback", warnings=("QUERY_PLANNER_OUTPUT_INVALID",))

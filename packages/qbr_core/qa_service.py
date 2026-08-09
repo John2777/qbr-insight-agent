@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -15,7 +16,10 @@ from .lease import LeaseCoordinator
 from .llm import EvidenceQAAgent
 from .query_planning import QueryPlannerAgent
 from .retrieval import EvidenceRetriever
+from .run_warnings import describe_warning
 from .skill_registry import SkillDescriptor, SkillRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _loads(value: str | None, default: Any) -> Any:
@@ -322,6 +326,7 @@ class QAApplicationService:
                 history=history,
                 document_ids=document_ids,
                 document_vocabulary=self._document_vocabulary(str(run["workspace_id"]), document_ids),
+                run_id=run_id,
             )
             answer_mode = plan.intent
             with self.db.transaction(immediate=True) as conn:
@@ -364,6 +369,7 @@ class QAApplicationService:
                     history=history,
                     answer_mode=answer_mode,
                     query_plan=plan.to_dict(),
+                    run_id=run_id,
                 )
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
@@ -418,6 +424,23 @@ class QAApplicationService:
         message_metadata: dict[str, Any] | None = None,
     ) -> None:
         run_id = str(run["id"])
+        if warnings:
+            severity_rank = {"info": 0, "warning": 1, "degraded": 2, "error": 3}
+            max_severity = max((describe_warning(code).severity for code in warnings), key=severity_rank.__getitem__)
+            log = logger.info if max_severity == "info" else logger.warning
+            log(
+                json.dumps(
+                    {
+                        "event": "answer_run_completed_with_signals",
+                        "run_id": run_id,
+                        "warning_codes": list(dict.fromkeys(warnings)),
+                        "max_severity": max_severity,
+                        "model_status": model_info.get("status"),
+                        "planner": model_info.get("planner"),
+                    },
+                    separators=(",", ":"),
+                )
+            )
         with self.db.transaction(immediate=True) as conn:
             conn.execute(
                 "UPDATE messages SET content=?,status='completed',metadata_json=? WHERE id=?",
