@@ -1,0 +1,4 @@
+interface:
+  display_name: "PPT Chart Data Extractor"
+  short_description: "Extract complex PPT chart data to JSON and CSV"
+  default_prompt: "Use $extract-ppt-chart-data to extract every complex chart from this PPT or PPTX into auditable JSON and CSV files."

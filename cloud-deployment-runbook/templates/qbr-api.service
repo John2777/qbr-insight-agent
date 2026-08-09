@@ -1,0 +1,26 @@
+[Unit]
+Description=QBR Insight Agent API
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/data/qbr
+
+[Service]
+Type=simple
+User=qbr
+Group=qbr
+WorkingDirectory=/opt/qbr/app
+EnvironmentFile=/etc/qbr/runtime.env
+ExecStart=/opt/qbr/app/.venv/bin/uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/qbr
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+apiVersion: qbr-agent.skills/v1
+kind: ParserSkill
+metadata:
+  name: extract-ppt-chart-data
+  version: 1.0.0
+spec:
+  entrypoint: scripts/extract_ppt_chart_data.py
+  schemaVersion: 1.0.0
+  usesModel: false
+  costClass: local
+  accepts:
+    mimeTypes:
+      - application/vnd.openxmlformats-officedocument.presentationml.presentation
+  outputSchema: schemas/charts.schema.json
+  capabilities:
+    - native-chart-data
+    - embedded-workbook
+    - chartex
+    - combo-chart
+    - confidence-and-provenance
+  limits:
+    maxFileMiB: 100
+    maxSlides: 200

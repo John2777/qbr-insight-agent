@@ -1,0 +1,16 @@
+apiVersion: qbr-agent.skills/v1
+kind: ReasoningSkill
+metadata:
+  name: analyze-ppt-table-data
+  version: 1.0.0
+spec:
+  entrypoint: scripts/analyze_ppt_table_data.py
+  accepts:
+    contentTypes:
+      - application/x-qbr-structured-table
+  capabilities:
+    - structured-table-reasoning
+    - exact-table-lookup
+    - deterministic-table-calculation
+  usesModel: false
+  costClass: local

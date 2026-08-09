@@ -1,0 +1,5 @@
+[
+  {"question": "Q2 Revenue 是多少？", "expected_terms": ["Revenue", "Q2"]},
+  {"question": "Pipeline 中 Won 阶段的数值", "expected_terms": ["Pipeline", "Won"]},
+  {"question": "Quarterly metrics", "expected_terms": ["Quarterly metrics"]}
+]

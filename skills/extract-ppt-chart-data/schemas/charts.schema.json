@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qbr-agent.local/schemas/extract-ppt-chart-data/charts-1.0.0.json",
+  "title": "Extracted PowerPoint chart data",
+  "type": "object",
+  "required": ["schema_version", "input", "parser", "summary", "slides", "charts", "warnings"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "input": {
+      "type": "object",
+      "required": ["path", "filename", "sha256", "size_bytes", "kind"],
+      "properties": {
+        "path": { "type": "string" },
+        "filename": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["ooxml", "ole-ppt"] },
+        "converted_for_parsing": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "parser": { "type": "object", "required": ["name", "version", "engine"] },
+    "summary": {
+      "type": "object",
+      "required": ["slide_count", "native_chart_count", "visual_fallback_candidate_count", "status"],
+      "properties": {
+        "slide_count": { "type": "integer", "minimum": 0 },
+        "native_chart_count": { "type": "integer", "minimum": 0 },
+        "visual_fallback_candidate_count": { "type": "integer", "minimum": 0 },
+        "status": { "enum": ["complete", "partial"] }
+      }
+    },
+    "slides": { "type": "array", "items": { "type": "object" } },
+    "charts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chart_id", "slide_number", "schema", "chart_types", "series", "data_source", "confidence"],
+        "properties": {
+          "chart_id": { "type": "string" },
+          "slide_number": { "type": "integer", "minimum": 1 },
+          "schema": { "enum": ["drawingml-chart", "chartex"] },
+          "chart_types": { "type": "array", "items": { "type": "string" } },
+          "series": { "type": "array", "items": { "type": "object" } },
+          "data_source": { "enum": ["embedded_workbook", "chart_cache_or_literal"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

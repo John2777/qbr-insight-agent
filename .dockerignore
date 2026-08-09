@@ -1,0 +1,16 @@
+.env
+awskey
+output
+graphify-out
+benchmark_results
+dist
+.git
+.venv
+**/__pycache__
+**/*.pyc
+apps/web/node_modules
+apps/web/dist
+data
+test-results
+playwright-report
+

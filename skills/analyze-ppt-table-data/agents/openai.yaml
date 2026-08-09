@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze PPT Table Data"
+  short_description: "Analyze structured PowerPoint table data"
+  default_prompt: "Use $analyze-ppt-table-data to answer questions from structured PowerPoint table rows with auditable calculations."

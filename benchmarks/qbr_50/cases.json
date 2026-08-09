@@ -1,0 +1,464 @@
+{
+  "dataset": "qbr-50",
+  "version": "1.0.0",
+  "language": "zh-CN",
+  "source_decks": {
+    "growth": "output/AIA_QBR_01_Group_Growth_FY2025.pptx",
+    "channel": "output/AIA_QBR_02_Channel_Customer_FY2025.pptx",
+    "capital": "output/AIA_QBR_03_Capital_Resilience_FY2025.pptx"
+  },
+  "cases": [
+    {
+      "id": "qbr-001", "category": "lookup", "scope": ["growth"],
+      "question": "2025年AIA的新业务价值（VONB）是多少，按固定汇率口径增长多少？",
+      "standard_answer": "2025年VONB为US$5.516bn（US$5,516m），按固定汇率（CER）增长15%。",
+      "fact_groups": [["vonb", "新业务价值"], ["固定汇率", "cer"]],
+      "numeric_groups": [["us$5.516bn", "us$5,516m", "5516"], ["15%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 4}, {"deck": "growth", "slide": 5}, {"deck": "growth", "slide": 6}, {"deck": "growth", "slide": 7}]
+    },
+    {
+      "id": "qbr-002", "category": "multi_fact", "scope": ["growth"],
+      "question": "2026年第一季度的VONB、ANP和VONB margin分别是多少？",
+      "standard_answer": "2026年第一季度VONB为US$1.757bn，ANP为US$3.152bn，VONB margin为56.0%。",
+      "fact_groups": [["vonb"], ["anp"], ["margin", "利润率"]],
+      "numeric_groups": [["us$1.757bn", "1.757"], ["us$3.152bn", "3.152"], ["56.0%", "56%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 2}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 2}]
+    },
+    {
+      "id": "qbr-003", "category": "chart_lookup", "scope": ["growth"],
+      "question": "在集团增长QBR的月度控制图中，香港在26/03的ANP模拟值是多少？",
+      "standard_answer": "香港在26/03的月度ANP模拟值为US$179m。",
+      "fact_groups": [["香港"], ["26/03"]],
+      "numeric_groups": [["179"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 3}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 3}]
+    },
+    {
+      "id": "qbr-004", "category": "calculation", "scope": ["growth"],
+      "question": "月度控制图中VONB Margin从24/10到26/03变化了多少？请给出起点、终点和相对变化率。",
+      "standard_answer": "VONB Margin从24/10的55.5升至26/03的56.0，增加0.5，按(56.0-55.5)/55.5计算，相对增长约0.9%。",
+      "fact_groups": [["24/10"], ["26/03"], ["vonb margin"]],
+      "numeric_groups": [["55.5"], ["56.0", "56"], ["0.9%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 3}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 3}]
+    },
+    {
+      "id": "qbr-005", "category": "lookup", "scope": ["growth"],
+      "question": "2025年EV Equity是多少，披露的同比/每股变化是多少？",
+      "standard_answer": "2025年EV Equity为US$79.7bn，披露的变化为每股增长14%。",
+      "fact_groups": [["ev equity", "内含价值权益"], ["每股", "/股"]],
+      "numeric_groups": [["us$79.7bn", "79.7"], ["14%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 6}]
+    },
+    {
+      "id": "qbr-006", "category": "calculation", "scope": ["growth"],
+      "question": "Operating ROEV从2024A到2025A提高了多少个百分点？",
+      "standard_answer": "Operating ROEV从2024A的14.9%升至2025A的15.8%，提高0.9个百分点。",
+      "fact_groups": [["operating roev", "营运roev"], ["2024a"], ["2025a"]],
+      "numeric_groups": [["14.9%"], ["15.8%"], ["0.9个百分点", "0.9ppt"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 6}]
+    },
+    {
+      "id": "qbr-007", "category": "calculation", "scope": ["growth"],
+      "question": "股东资本比率从2023A到2025A累计下降了多少个百分点？",
+      "standard_answer": "股东资本比率从2023A的269%降至2025A的221%，累计下降48个百分点。",
+      "fact_groups": [["股东资本比率", "shareholder capital ratio"], ["2023a"], ["2025a"]],
+      "numeric_groups": [["269%"], ["221%"], ["48个百分点", "48ppt"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 6}]
+    },
+    {
+      "id": "qbr-008", "category": "table_reasoning", "scope": ["growth"],
+      "question": "区域经营矩阵中哪个市场的人均产能最高？数值是多少？",
+      "standard_answer": "新加坡的人均产能最高，为1.52。",
+      "fact_groups": [["新加坡"], ["人均产能"]],
+      "numeric_groups": [["1.52"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 4}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 4}]
+    },
+    {
+      "id": "qbr-009", "category": "calculation", "scope": ["growth"],
+      "question": "区域经营矩阵中，香港VONB比中国内地高多少US$m？",
+      "standard_answer": "香港VONB为US$2,256m，中国内地为US$1,180m，香港高US$1,076m。",
+      "fact_groups": [["香港"], ["中国内地"]],
+      "numeric_groups": [["2,256", "2256"], ["1,180", "1180"], ["1,076", "1076"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 4}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 4}, {"deck": "growth", "slide": 5}]
+    },
+    {
+      "id": "qbr-010", "category": "multi_fact", "scope": ["growth"],
+      "question": "其他市场的13M继续率和数字直通率分别是多少？",
+      "standard_answer": "其他市场的13M继续率为86.8%，数字直通率为63%。",
+      "fact_groups": [["其他市场"], ["13m继续率"], ["数字直通率"]],
+      "numeric_groups": [["86.8%"], ["63%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 4}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 4}]
+    },
+    {
+      "id": "qbr-011", "category": "threshold", "scope": ["growth"],
+      "question": "区域组合的最大市场占比、Top-2占比和组合增长是否都满足阈值？请列出当前值和阈值。",
+      "standard_answer": "三项均满足阈值：最大市场占比41%（阈值<45%）；Top-2占比62%（阈值<70%）；组合增长15%（阈值>10%）。",
+      "fact_groups": [["均满足", "全部满足", "三项都满足"], ["最大市场占比"], ["top-2占比"], ["组合增长"]],
+      "numeric_groups": [["41%"], ["45%"], ["62%"], ["70%"], ["15%"], ["10%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 5}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 5}]
+    },
+    {
+      "id": "qbr-012", "category": "management_summary", "scope": ["growth"],
+      "question": "集团增长QBR列出的下一季度四项优先事项及各自Owner是什么？",
+      "standard_answer": "四项优先事项是：巩固香港动量（HK CEO / Product）；扩展内地产能（China CEO / Agency）；修复泰国基数（Thailand CEO）；提升现金转化（Group CFO / Actuarial）。",
+      "fact_groups": [["巩固香港动量"], ["hk ceo", "product"], ["扩展内地产能"], ["china ceo", "agency"], ["修复泰国基数"], ["thailand ceo"], ["提升现金转化"], ["group cfo", "actuarial"]],
+      "numeric_groups": [],
+      "evidence_groups": [[{"deck": "growth", "slide": 7}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 7}]
+    },
+    {
+      "id": "qbr-013", "category": "table_reasoning", "scope": ["channel"],
+      "question": "渠道经营表中转化率最高的是哪个渠道？转化率是多少？",
+      "standard_answer": "团险的转化率最高，为43.8%。",
+      "fact_groups": [["团险"], ["转化率"]],
+      "numeric_groups": [["43.8%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-014", "category": "table_reasoning", "scope": ["channel"],
+      "question": "渠道经营表中CAC最低的是哪个渠道？金额是多少？",
+      "standard_answer": "数字直销的CAC最低，为US$74。",
+      "fact_groups": [["数字直销"], ["cac"]],
+      "numeric_groups": [["us$74", "74"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-015", "category": "table_reasoning", "scope": ["channel"],
+      "question": "哪个渠道的13M继续率最高？数值是多少？",
+      "standard_answer": "续期/交叉销售的13M继续率最高，为94.0%。",
+      "fact_groups": [["续期/交叉销售", "续期交叉销售"], ["13m继续率"]],
+      "numeric_groups": [["94.0%", "94%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-016", "category": "calculation", "scope": ["channel"],
+      "question": "代理人渠道APE占渠道合计APE的比例约为多少？请给出计算。",
+      "standard_answer": "代理人APE为US$5,240m，合计APE为US$10,600m；5,240/10,600≈49.4%。",
+      "fact_groups": [["代理人"], ["ape"]],
+      "numeric_groups": [["5,240", "5240"], ["10,600", "10600"], ["49.4%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-017", "category": "calculation", "scope": ["channel"],
+      "question": "数字直销的线索量是代理人渠道的多少倍？",
+      "standard_answer": "数字直销线索量为4,800k，代理人为2,860k；4,800/2,860≈1.68倍。",
+      "fact_groups": [["数字直销"], ["代理人"]],
+      "numeric_groups": [["4,800", "4800"], ["2,860", "2860"], ["1.68倍", "1.68x"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-018", "category": "chart_lookup", "scope": ["channel"],
+      "question": "渠道月度控制图中电子投保率在26/04的模拟值是多少？",
+      "standard_answer": "电子投保率在26/04的模拟值为78.7%。",
+      "fact_groups": [["电子投保率"], ["26/04"]],
+      "numeric_groups": [["78.7%", "78.7"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 3}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 3}, {"deck": "channel", "slide": 5}, {"deck": "channel", "slide": 7}]
+    },
+    {
+      "id": "qbr-019", "category": "multi_fact", "scope": ["channel"],
+      "question": "渠道组合中代理触点和非代理触点各占多少？非代理触点由哪些部分构成？",
+      "standard_answer": "代理人占43%，非代理触点合计57%；非代理触点由银行保险24%、数字直销14%、团险11%和生态合作8%构成。",
+      "fact_groups": [["代理人"], ["银行保险"], ["数字直销"], ["团险"], ["生态合作"]],
+      "numeric_groups": [["43%"], ["57%"], ["24%"], ["14%"], ["11%"], ["8%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 5}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 5}]
+    },
+    {
+      "id": "qbr-020", "category": "threshold", "scope": ["channel"],
+      "question": "电子投保率、CAC和13M继续率是否达到各自阈值？",
+      "standard_answer": "三项均达标：电子投保率78%（>75%）；CAC为US$242（<260）；13M继续率89.1%（>88%）。",
+      "fact_groups": [["均达标", "全部达标", "三项都达标"], ["电子投保率"], ["cac"], ["13m继续率"]],
+      "numeric_groups": [["78%"], ["75%"], ["us$242", "242"], ["260"], ["89.1%"], ["88%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 5}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 5}, {"deck": "channel", "slide": 7}]
+    },
+    {
+      "id": "qbr-021", "category": "management_summary", "scope": ["channel"],
+      "question": "渠道与客户QBR的下一季度四项优先事项是什么？",
+      "standard_answer": "四项优先事项是代理AI辅助、数字核保直通、健康旅程运营和渠道经济性。",
+      "fact_groups": [["代理ai辅助"], ["数字核保直通"], ["健康旅程运营"], ["渠道经济性"]],
+      "numeric_groups": [],
+      "evidence_groups": [[{"deck": "channel", "slide": 7}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 7}]
+    },
+    {
+      "id": "qbr-022", "category": "table_reasoning", "scope": ["capital"],
+      "question": "资本配置矩阵中年度金额最大的两项用途是什么？各自金额和占比是多少？",
+      "standard_answer": "金额最大的两项是股息US$2,480m（34%）和新业务投资US$2,314m（32%）。",
+      "fact_groups": [["股息"], ["新业务投资"]],
+      "numeric_groups": [["2,480", "2480"], ["34%"], ["2,314", "2314"], ["32%"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}]
+    },
+    {
+      "id": "qbr-023", "category": "multi_fact", "scope": ["capital"],
+      "question": "股份回购的年度额、占比、预期ROE、流动性和风险限额利用分别是什么？",
+      "standard_answer": "股份回购年度额为US$1,743m，占24%，预期ROE为15.5%，流动性为高，风险限额利用为82%。",
+      "fact_groups": [["股份回购"], ["流动性为高", "高流动性"], ["风险限额利用"]],
+      "numeric_groups": [["1,743", "1743"], ["24%"], ["15.5%"], ["82%"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}, {"deck": "capital", "slide": 5}]
+    },
+    {
+      "id": "qbr-024", "category": "lookup", "scope": ["capital"],
+      "question": "资本配置矩阵的年度额合计是多少？",
+      "standard_answer": "资本配置年度额合计为US$7,292m。",
+      "fact_groups": [["合计"], ["资本配置"]],
+      "numeric_groups": [["us$7,292m", "7,292", "7292"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}]
+    },
+    {
+      "id": "qbr-025", "category": "chart_lookup", "scope": ["capital"],
+      "question": "资本月度监控图中UFSG在26/05的模拟值是多少？",
+      "standard_answer": "UFSG在26/05的月度模拟值为US$581m。",
+      "fact_groups": [["ufsg"], ["26/05"]],
+      "numeric_groups": [["581"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 3}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 3}]
+    },
+    {
+      "id": "qbr-026", "category": "calculation", "scope": ["capital"],
+      "question": "资本情景路径中哪一步的阶段值降幅最大？下降多少？",
+      "standard_answer": "最大降幅发生在“支付股息”这一步，阶段值从84降至76，下降8。",
+      "fact_groups": [["支付股息"]],
+      "numeric_groups": [["84"], ["76"], ["下降8", "-8"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 5}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 5}]
+    },
+    {
+      "id": "qbr-027", "category": "threshold", "scope": ["capital"],
+      "question": "资本QBR的两个风险闸门当前分别是什么状态？请用阈值判断。",
+      "standard_answer": "两个风险闸门均为绿色：股东资本比率221%，高于绿色阈值210%；净FSG覆盖1.4x，高于绿色阈值1.3x。",
+      "fact_groups": [["均为绿色", "都是绿色", "两个风险闸门均为绿"], ["股东资本比率"], ["净fsg覆盖"]],
+      "numeric_groups": [["221%"], ["210%"], ["1.4x"], ["1.3x"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 7}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 5}, {"deck": "capital", "slide": 7}]
+    },
+    {
+      "id": "qbr-028", "category": "management_summary", "scope": ["capital"],
+      "question": "资本韧性QBR列出的四项下一季度优先事项及Owner是什么？",
+      "standard_answer": "四项事项是：优化资本强度（Actuarial / Product）；动态资本回报（Group CFO）；利率与久期（CIO / ALM）；压力测试联动（CRO / Finance）。",
+      "fact_groups": [["优化资本强度"], ["actuarial", "product"], ["动态资本回报"], ["group cfo"], ["利率与久期"], ["cio", "alm"], ["压力测试联动"], ["cro", "finance"]],
+      "numeric_groups": [],
+      "evidence_groups": [[{"deck": "capital", "slide": 7}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 7}]
+    },
+    {
+      "id": "qbr-029", "category": "provenance", "scope": ["growth", "channel", "capital"],
+      "question": "这三份QBR里哪些数据属于公开披露基线，哪些属于测试模拟数据？请说明边界。",
+      "standard_answer": "公开披露基线包括2023–2025核心财务指标、2025香港VONB及其增长、2026年第一季度VONB/ANP/margin，以及2025资本比率、Net FSG和回购。月度控制图序列、经营矩阵、渠道组合与质量指标、资本路径比例、行动项和风险阈值均为用于验证的模拟管理数据；增长QBR中除香港外的区域拆分也是测试估算。",
+      "fact_groups": [["公开披露"], ["核心财务指标"], ["香港"], ["2026"], ["月度", "控制图"], ["经营矩阵"], ["模拟", "测试"], ["行动项", "优先事项"], ["风险阈值", "风险闸门"]],
+      "numeric_groups": [],
+      "evidence_groups": [[{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 6}], [{"deck": "growth", "slide": 3}, {"deck": "channel", "slide": 3}, {"deck": "capital", "slide": 3}], [{"deck": "growth", "slide": 4}, {"deck": "channel", "slide": 4}, {"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 1}, {"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 3}, {"deck": "growth", "slide": 4}, {"deck": "growth", "slide": 5}, {"deck": "growth", "slide": 6}, {"deck": "growth", "slide": 7}, {"deck": "channel", "slide": 1}, {"deck": "channel", "slide": 2}, {"deck": "channel", "slide": 3}, {"deck": "channel", "slide": 4}, {"deck": "channel", "slide": 5}, {"deck": "channel", "slide": 6}, {"deck": "channel", "slide": 7}, {"deck": "capital", "slide": 1}, {"deck": "capital", "slide": 2}, {"deck": "capital", "slide": 3}, {"deck": "capital", "slide": 4}, {"deck": "capital", "slide": 5}, {"deck": "capital", "slide": 6}, {"deck": "capital", "slide": 7}]
+    },
+    {
+      "id": "qbr-030", "category": "abstention", "scope": ["growth", "channel", "capital"],
+      "question": "2026年第二季度日本市场的VONB精确值是多少？",
+      "standard_answer": "三份文件未提供2026年第二季度日本市场VONB的精确值，应明确说明证据不足，不能推测。",
+      "fact_groups": [["没有足够证据", "未提供", "证据不足", "无法回答"]],
+      "numeric_groups": [],
+      "evidence_groups": [],
+      "allowed_evidence": [],
+      "expected_abstention": true
+    },
+    {
+      "id": "qbr-031", "category": "lookup", "scope": ["growth"],
+      "question": "2025年OPAT是多少，披露的每股增长是多少？",
+      "standard_answer": "2025年OPAT为US$7,136m（US$7.136bn），披露的每股增长为12%。",
+      "fact_groups": [["opat", "税后营运溢利"], ["每股", "/股"]],
+      "numeric_groups": [["7,136", "7136", "7.136bn"], ["12%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 2}, {"deck": "growth", "slide": 6}]
+    },
+    {
+      "id": "qbr-032", "category": "calculation", "scope": ["growth"],
+      "question": "Net FSG从2024A到2025A增加了多少US$m？",
+      "standard_answer": "Net FSG从2024A的US$4,020m增至2025A的US$4,451m，增加US$431m。",
+      "fact_groups": [["net fsg", "净自由盈余产生"], ["2024a"], ["2025a"]],
+      "numeric_groups": [["4,020", "4020"], ["4,451", "4451"], ["431"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 6}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 6}]
+    },
+    {
+      "id": "qbr-033", "category": "table_reasoning", "scope": ["growth"],
+      "question": "区域经营矩阵中数字直通率最低的是哪个市场？数值是多少？",
+      "standard_answer": "其他市场的数字直通率最低，为63%。",
+      "fact_groups": [["其他市场"], ["数字直通率", "digital stp"]],
+      "numeric_groups": [["63%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 4}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 4}]
+    },
+    {
+      "id": "qbr-034", "category": "chart_lookup", "scope": ["growth"],
+      "question": "集团增长月度控制图中，中国内地在26/03的ANP模拟值是多少？",
+      "standard_answer": "中国内地在26/03的ANP模拟值为US$184m。",
+      "fact_groups": [["中国内地"], ["26/03"]],
+      "numeric_groups": [["184"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 3}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 3}]
+    },
+    {
+      "id": "qbr-035", "category": "calculation", "scope": ["growth"],
+      "question": "26/03中国内地和香港的ANP模拟值哪个更高？高多少US$m？",
+      "standard_answer": "26/03中国内地ANP为US$184m，香港为US$179m；中国内地高US$5m。",
+      "fact_groups": [["中国内地"], ["香港"]],
+      "numeric_groups": [["184"], ["179"], ["5"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 3}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 3}]
+    },
+    {
+      "id": "qbr-036", "category": "multi_fact", "scope": ["growth"],
+      "question": "双轴控制图中26/03的VONB Margin和Agent Productivity分别是多少，位于哪一侧坐标轴？",
+      "standard_answer": "26/03的VONB Margin为56.0，Agent Productivity为79.2；两者都是质量/效率指标，读取右侧次轴。",
+      "fact_groups": [["vonb margin"], ["agent productivity"], ["右侧次轴", "右轴"]],
+      "numeric_groups": [["56.0", "56"], ["79.2"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 3}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 3}]
+    },
+    {
+      "id": "qbr-037", "category": "calculation", "scope": ["growth"],
+      "question": "区域价值图中中国内地VONB从FY2024到FY2025增加了多少，增幅约多少？",
+      "standard_answer": "中国内地VONB从FY2024的US$980m增至FY2025的US$1,180m，增加US$200m，增幅约20.4%。",
+      "fact_groups": [["中国内地"], ["fy2024"], ["fy2025"]],
+      "numeric_groups": [["980"], ["1,180", "1180"], ["200"], ["20.4%"]],
+      "evidence_groups": [[{"deck": "growth", "slide": 5}]],
+      "allowed_evidence": [{"deck": "growth", "slide": 4}, {"deck": "growth", "slide": 5}]
+    },
+    {
+      "id": "qbr-038", "category": "calculation", "scope": ["channel"],
+      "question": "银行保险的CAC比代理人渠道低多少US$？",
+      "standard_answer": "银行保险CAC为US$286，代理人为US$418；银行保险低US$132。",
+      "fact_groups": [["银行保险"], ["代理人"], ["cac"]],
+      "numeric_groups": [["286"], ["418"], ["132"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-039", "category": "table_reasoning", "scope": ["channel"],
+      "question": "渠道经营表中NPS最高的是哪个渠道？NPS是多少？",
+      "standard_answer": "续期/交叉销售的NPS最高，为73。",
+      "fact_groups": [["续期/交叉销售", "续期交叉销售"], ["nps"]],
+      "numeric_groups": [["73"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-040", "category": "multi_fact", "scope": ["channel"],
+      "question": "渠道经营表合计签发量、转化率和APE分别是多少？",
+      "standard_answer": "合计签发量为3,565k，转化率为25.9%，APE为US$10,600m。",
+      "fact_groups": [["合计"], ["签发"], ["转化率"], ["ape"]],
+      "numeric_groups": [["3,565", "3565"], ["25.9%"], ["10,600", "10600"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 4}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 4}]
+    },
+    {
+      "id": "qbr-041", "category": "chart_lookup", "scope": ["channel"],
+      "question": "渠道控制图中26/04的线索转化率模拟值是多少？",
+      "standard_answer": "26/04的线索转化率模拟值为35.3%。",
+      "fact_groups": [["线索转化率"], ["26/04"]],
+      "numeric_groups": [["35.3%", "35.3"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 3}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 3}]
+    },
+    {
+      "id": "qbr-042", "category": "calculation", "scope": ["channel"],
+      "question": "电子投保率从24/10到26/04的相对增幅是多少？请给出起点和终点。",
+      "standard_answer": "电子投保率从24/10的58.0%升至26/04的78.7%，相对增幅约35.7%。",
+      "fact_groups": [["电子投保率"], ["24/10"], ["26/04"]],
+      "numeric_groups": [["58.0", "58"], ["78.7"], ["35.7%"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 3}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 3}]
+    },
+    {
+      "id": "qbr-043", "category": "chart_reasoning", "scope": ["channel"],
+      "question": "月度控制图中线索转化率在哪个月最高？最高值是多少？",
+      "standard_answer": "线索转化率在26/04最高，最高值为35.3%。",
+      "fact_groups": [["线索转化率"], ["26/04"]],
+      "numeric_groups": [["35.3%", "35.3"]],
+      "evidence_groups": [[{"deck": "channel", "slide": 3}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 3}]
+    },
+    {
+      "id": "qbr-044", "category": "management_summary", "scope": ["channel"],
+      "question": "渠道与客户QBR四项下一季度优先事项的Owner分别是谁？",
+      "standard_answer": "代理AI辅助由Agency / AI COE负责；数字核保直通由Ops / Underwriting负责；健康旅程运营由Customer / Health负责；渠道经济性由Finance / Data负责。",
+      "fact_groups": [["代理ai辅助"], ["agency", "ai coe"], ["数字核保直通"], ["ops", "underwriting"], ["健康旅程运营"], ["customer", "health"], ["渠道经济性"], ["finance", "data"]],
+      "numeric_groups": [],
+      "evidence_groups": [[{"deck": "channel", "slide": 7}]],
+      "allowed_evidence": [{"deck": "channel", "slide": 7}]
+    },
+    {
+      "id": "qbr-045", "category": "table_reasoning", "scope": ["capital"],
+      "question": "资本配置矩阵中风险限额利用最低的是哪项用途？数值是多少？",
+      "standard_answer": "战略选择权的风险限额利用最低，为35%。",
+      "fact_groups": [["战略选择权"], ["风险限额利用"]],
+      "numeric_groups": [["35%"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}]
+    },
+    {
+      "id": "qbr-046", "category": "table_reasoning", "scope": ["capital"],
+      "question": "资本配置矩阵中期限为长的用途有哪些？各自年度额是多少？",
+      "standard_answer": "期限为长的用途有新业务投资和战略选择权，年度额分别为US$2,314m和US$180m。",
+      "fact_groups": [["新业务投资"], ["战略选择权"]],
+      "numeric_groups": [["2,314", "2314"], ["180"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}]
+    },
+    {
+      "id": "qbr-047", "category": "calculation", "scope": ["capital"],
+      "question": "资本配置矩阵中流动性为高的用途年度额合计多少，占总额多少？",
+      "standard_answer": "高流动性用途包括股息、股份回购和缓冲/其他，年度额合计US$4,378m，占总额60%。",
+      "fact_groups": [["股息"], ["股份回购"], ["缓冲/其他", "缓冲其他"]],
+      "numeric_groups": [["4,378", "4378"], ["60%"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 4}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 4}]
+    },
+    {
+      "id": "qbr-048", "category": "chart_lookup", "scope": ["capital"],
+      "question": "资本月度控制图中26/05的股东资本比率模拟值是多少？",
+      "standard_answer": "26/05的股东资本比率模拟值为230.2。",
+      "fact_groups": [["股东资本比率"], ["26/05"]],
+      "numeric_groups": [["230.2"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 3}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 3}, {"deck": "capital", "slide": 5}]
+    },
+    {
+      "id": "qbr-049", "category": "calculation", "scope": ["capital"],
+      "question": "资本控制图中UFSG从26/02到26/05增加了多少，相对增幅约多少？",
+      "standard_answer": "UFSG从26/02的500增至26/05的581，增加81，相对增幅约16.2%。",
+      "fact_groups": [["ufsg"], ["26/02"], ["26/05"]],
+      "numeric_groups": [["500"], ["581"], ["81"], ["16.2%"]],
+      "evidence_groups": [[{"deck": "capital", "slide": 3}]],
+      "allowed_evidence": [{"deck": "capital", "slide": 3}]
+    },
+    {
+      "id": "qbr-050", "category": "abstention", "scope": ["growth", "channel"],
+      "question": "2025年越南市场的13M继续率精确值是多少？",
+      "standard_answer": "两份文件未提供2025年越南市场13M继续率的精确值，应明确说明证据不足，不能推测。",
+      "fact_groups": [["没有足够证据", "未提供", "证据不足", "无法回答"]],
+      "numeric_groups": [],
+      "evidence_groups": [],
+      "allowed_evidence": [],
+      "expected_abstention": true
+    }
+  ]
+}

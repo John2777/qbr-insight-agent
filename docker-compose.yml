@@ -1,0 +1,82 @@
+x-backend-service: &backend-service
+  build:
+    context: .
+    dockerfile: deploy/docker/backend.Dockerfile
+  environment: &backend-environment
+    APP_ENV: ${APP_ENV:-local}
+    AUTH_MODE: ${AUTH_MODE:-demo}
+    JWT_SECRET: ${JWT_SECRET:-}
+    JWT_ISSUER: ${JWT_ISSUER:-qbr-insight-agent}
+    JWT_AUDIENCE: ${JWT_AUDIENCE:-qbr-web}
+    PASSWORD_USERNAME: ${PASSWORD_USERNAME:-}
+    PASSWORD_HASH: ${PASSWORD_HASH:-}
+    PASSWORD_USER_ID: ${PASSWORD_USER_ID:-user_demo}
+    PASSWORD_WORKSPACE_ID: ${PASSWORD_WORKSPACE_ID:-ws_demo}
+    SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+    LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+    LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-300}
+    QBR_DATA_DIR: /data
+    DATABASE_PATH: /data/sqlite/app.sqlite3
+    OBJECT_STORE_PATH: /data/objects
+    VECTOR_INDEX_DIR: /data/vector_indexes
+    RUN_INLINE_WORKER: "false"
+    LLM_ENABLED: ${LLM_ENABLED:-false}
+    LLM_PROVIDER: ${LLM_PROVIDER:-openai-compatible}
+    LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+    LLM_API_KEY: ${LLM_API_KEY:-}
+    LLM_MODEL: ${LLM_MODEL:-}
+    LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+    LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+    LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1200}
+    LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+    RETRIEVAL_STRATEGY: ${RETRIEVAL_STRATEGY:-fts}
+    EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai-compatible}
+    EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+    EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+    EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+    EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-0}
+    EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+    VECTOR_MIN_SIMILARITY: ${VECTOR_MIN_SIMILARITY:-0.30}
+    VECTOR_CANDIDATE_K: ${VECTOR_CANDIDATE_K:-24}
+    LEXICAL_CANDIDATE_K: ${LEXICAL_CANDIDATE_K:-24}
+    RETRIEVAL_RRF_K: ${RETRIEVAL_RRF_K:-60}
+    RETRIEVAL_LEXICAL_WEIGHT: ${RETRIEVAL_LEXICAL_WEIGHT:-1.25}
+    RETRIEVAL_VECTOR_WEIGHT: ${RETRIEVAL_VECTOR_WEIGHT:-1.0}
+    JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
+    JOB_HEARTBEAT_SECONDS: ${JOB_HEARTBEAT_SECONDS:-30}
+    JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  volumes:
+    - qbr-data:/data
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *backend-service
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    <<: *backend-service
+    command: ["python", "-m", "apps.worker.main"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    ports:
+      - "3000:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qbr-data:
