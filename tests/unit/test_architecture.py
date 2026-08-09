@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from packages.qbr_core import DeterministicAnswerEngine, QAApplicationService, QBRService, Settings
+from packages.qbr_core.errors import Conflict, ResourceNotFound
 from packages.qbr_core.lease import LeaseCoordinator, LeasePolicy
 
 ROOT = Path(__file__).parents[2]
@@ -59,6 +60,31 @@ def test_conversation_history_is_user_scoped_and_orders_recent_activity_first(tm
     assert items[0]["scope"] == {"document_ids": []}
     assert older["id"] != items[0]["id"]
     assert queued["run_id"]
+
+
+def test_conversation_deletion_is_user_scoped_and_rejects_active_runs(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False))
+    conversation = service.create_conversation("ws_demo", "user_demo", title="Delete me")
+    queued = service.ask(conversation["id"], "仍在生成的问题", "ws_demo", "user_demo")
+    with service.db.transaction(immediate=True) as conn:
+        conn.execute(
+            "INSERT INTO users(id,email,display_name,created_at) VALUES (?,?,?,?)",
+            ("another_user", "another@example.com", "Another User", conversation["created_at"]),
+        )
+    private = service.create_conversation("ws_demo", "another_user", title="Private")
+
+    with pytest.raises(Conflict, match="still generating"):
+        service.delete_conversation(conversation["id"], "ws_demo", "user_demo")
+    with pytest.raises(ResourceNotFound):
+        service.delete_conversation(private["id"], "ws_demo", "user_demo")
+
+    with service.db.transaction(immediate=True) as conn:
+        conn.execute("UPDATE runs SET status='failed' WHERE id=?", (queued["run_id"],))
+    service.delete_conversation(conversation["id"], "ws_demo", "user_demo")
+
+    with pytest.raises(ResourceNotFound):
+        service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    assert service.get_conversation(private["id"], "ws_demo", "another_user")["title"] == "Private"
 
 
 @pytest.mark.parametrize(

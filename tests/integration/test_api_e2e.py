@@ -55,6 +55,24 @@ def test_upload_ingest_query_citation_and_delete(tmp_path: Path, synthetic_pptx:
         assert run["citations"][0]["source_kind"] == "embedded_workbook"
         assert run["citations"][0]["bbox"] == {"x": 100 / 12192000, "y": 200 / 6858000, "w": 800 / 12192000, "h": 500 / 6858000}
 
+        assert client.post(
+            f"/api/v1/messages/{sent.json()['assistant_message_id']}/feedback",
+            json={"rating": 1, "category": "accurate"},
+        ).status_code == 201
+        conversation_deleted = client.delete(f"/api/v1/conversations/{conversation['id']}")
+        assert conversation_deleted.status_code == 204
+        assert client.get(f"/api/v1/conversations/{conversation['id']}").status_code == 404
+        assert client.get("/api/v1/conversations?limit=10").json()["items"] == []
+        with app.state.service.db.read() as conn:
+            related_tables = ("conversations", "messages", "runs", "run_events", "citations", "feedback")
+            assert {table: conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in related_tables} == {
+                table: 0 for table in related_tables
+            }
+            assert conn.execute(
+                "SELECT count(*) FROM audit_events WHERE action='conversation.delete' AND target_id=?",
+                (conversation["id"],),
+            ).fetchone()[0] == 1
+
         deleted = client.delete(f"/api/v1/documents/{resources['document']['id']}")
         assert deleted.status_code == 204
         assert client.get(f"/api/v1/documents/{resources['document']['id']}").status_code == 404

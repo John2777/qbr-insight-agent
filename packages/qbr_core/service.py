@@ -1083,6 +1083,9 @@ class QBRService:
     ) -> list[dict[str, Any]]:
         return self.qa_service.list_conversations(workspace_id, user_id, limit)
 
+    def delete_conversation(self, conversation_id: str, workspace_id: str, user_id: str) -> None:
+        self.qa_service.delete_conversation(conversation_id, workspace_id, user_id)
+
     def ask(
         self,
         conversation_id: str,

@@ -135,6 +135,65 @@ class QAApplicationService:
             items.append(item)
         return items
 
+    def delete_conversation(self, conversation_id: str, workspace_id: str, user_id: str) -> None:
+        """Delete a user's completed conversation and all of its dependent records."""
+        with self.db.transaction(immediate=True) as conn:
+            conversation = conn.execute(
+                "SELECT id FROM conversations WHERE id=? AND workspace_id=? AND user_id=?",
+                (conversation_id, workspace_id, user_id),
+            ).fetchone()
+            if not conversation:
+                raise ResourceNotFound("Conversation not found")
+
+            active_run = conn.execute(
+                "SELECT id FROM runs WHERE conversation_id=? AND status IN ('pending','running') LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+            if active_run:
+                raise Conflict("Conversation is still generating an answer")
+
+            message_ids = [
+                str(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM messages WHERE conversation_id=?",
+                    (conversation_id,),
+                ).fetchall()
+            ]
+            run_ids = [
+                str(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM runs WHERE conversation_id=?",
+                    (conversation_id,),
+                ).fetchall()
+            ]
+
+            def delete_related(table: str, column: str, ids: list[str]) -> int:
+                if not ids:
+                    return 0
+                placeholders = ",".join("?" for _ in ids)
+                return max(conn.execute(
+                    f"DELETE FROM {table} WHERE {column} IN ({placeholders})",
+                    ids,
+                ).rowcount, 0)
+
+            deleted = {
+                "feedback": delete_related("feedback", "message_id", message_ids),
+                "citations": delete_related("citations", "message_id", message_ids),
+                "run_events": delete_related("run_events", "run_id", run_ids),
+                "runs": delete_related("runs", "id", run_ids),
+                "messages": delete_related("messages", "id", message_ids),
+            }
+            conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
+            self.db.audit(
+                conn,
+                workspace_id,
+                user_id,
+                "conversation.delete",
+                "conversation",
+                conversation_id,
+                {"deleted": deleted},
+            )
+
     def ask(
         self,
         conversation_id: str,

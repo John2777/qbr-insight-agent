@@ -47,17 +47,25 @@ test("queued answer is rendered from the SSE stream", async ({ page }) => {
 
 test("conversation history opens the complete question and answer", async ({ page }) => {
   await mockSession(page);
+  let historyVisible = true;
   await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [] } }));
-  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: [{
+  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: historyVisible ? [{
     id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, message_count: 2,
     last_question: "VONB 是什么含义？", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z"
-  }] } }));
-  await page.route("**/api/v1/conversations/conv_history", (route) => route.fulfill({ json: {
-    id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, messages: [
-      { id: "history_user", role: "user", content: "VONB 是什么含义？", status: "completed", citations: [] },
-      { id: "history_answer", role: "assistant", content: "VONB 指新业务价值。", status: "completed", citations: [] }
-    ]
-  } }));
+  }] : [] } }));
+  await page.route("**/api/v1/conversations/conv_history", async (route) => {
+    if (route.request().method() === "DELETE") {
+      historyVisible = false;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({ json: {
+      id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, messages: [
+        { id: "history_user", role: "user", content: "VONB 是什么含义？", status: "completed", citations: [] },
+        { id: "history_answer", role: "assistant", content: "VONB 指新业务价值。", status: "completed", citations: [] }
+      ]
+    } });
+  });
 
   await page.goto("/documents");
   await page.getByRole("link", { name: /VONB 含义.*VONB 是什么含义/ }).click();
@@ -65,6 +73,11 @@ test("conversation history opens the complete question and answer", async ({ pag
   await expect(page).toHaveURL(/\/chat\/conv_history$/);
   await expect(page.getByRole("main").getByText("VONB 是什么含义？", { exact: true })).toBeVisible();
   await expect(page.getByRole("main").getByText("VONB 指新业务价值。", { exact: true })).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除会话：VONB 含义" }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page.getByRole("link", { name: /VONB 含义/ })).toHaveCount(0);
 });
 
 test("analytics page exposes quality metrics", async ({ page }) => {

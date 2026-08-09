@@ -500,6 +500,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         return service.get_conversation(conversation_id, principal.workspace_id, principal.user_id)
 
+    @app.delete("/api/v1/conversations/{conversation_id}", status_code=204)
+    def delete_conversation(
+        conversation_id: str,
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[QBRService, Depends(_service)],
+    ) -> Response:
+        principal.require("ask")
+        service.delete_conversation(conversation_id, principal.workspace_id, principal.user_id)
+        return Response(status_code=204)
+
     @app.post("/api/v1/conversations/{conversation_id}/messages", status_code=202)
     async def ask(
         conversation_id: str,
