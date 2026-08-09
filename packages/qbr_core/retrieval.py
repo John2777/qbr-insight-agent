@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .db import Database
+from .evidence import classify_content_role
 from .vector import VectorSearchBackend
+
+if TYPE_CHECKING:
+    from .query_planning import QueryPlan
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +25,36 @@ QUERY_EXPANSIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("模拟", ("synthetic", "illustrative")),
 )
 
+ENGLISH_STOPWORDS = {
+    "about",
+    "and",
+    "are",
+    "does",
+    "for",
+    "from",
+    "have",
+    "how",
+    "in",
+    "into",
+    "is",
+    "of",
+    "on",
+    "ppt",
+    "presentation",
+    "that",
+    "the",
+    "this",
+    "to",
+    "what",
+    "which",
+    "with",
+}
+
 
 def query_terms(text: str, *, limit: int = 16) -> list[str]:
     """Build conservative FTS terms, including Chinese bigrams for unicode61."""
     folded = text.casefold()
-    terms = re.findall(r"[a-z0-9%_-]{2,}", folded)
+    terms = [term for term in re.findall(r"[a-z0-9%_-]{2,}", folded) if term not in ENGLISH_STOPWORDS]
     for trigger, expansions in QUERY_EXPANSIONS:
         if trigger in folded:
             terms.extend(expansions)
@@ -161,6 +190,121 @@ class EvidenceRetriever:
             query,
             diagnostics,
         )
+
+    def search_plan(
+        self,
+        plan: QueryPlan,
+        workspace_id: str,
+        document_ids: list[str],
+        *,
+        top_k: int = 12,
+        strategy: str | None = None,
+    ) -> RetrievalResult:
+        """Execute all retrieval hypotheses and fuse them without losing the original-query lane."""
+        fused: dict[str, dict[str, Any]] = {}
+        scores: dict[str, float] = {}
+        matched_queries: dict[str, list[str]] = {}
+        query_diagnostics: list[dict[str, Any]] = []
+        candidate_k = max(top_k, min(max(self.lexical_candidate_k, self.vector_candidate_k), 32))
+        for retrieval_query in plan.retrieval_queries:
+            result = self.search(
+                retrieval_query.text,
+                workspace_id,
+                document_ids,
+                top_k=candidate_k,
+                strategy=strategy,
+            )
+            query_diagnostics.append(
+                {
+                    "query_id": retrieval_query.query_id,
+                    "kind": retrieval_query.kind,
+                    "text": retrieval_query.text,
+                    "candidate_count": len(result.items),
+                    "strategy": result.strategy,
+                    "diagnostics": result.diagnostics,
+                }
+            )
+            for rank, row in enumerate(result.items, 1):
+                chunk_id = str(row["id"])
+                fused.setdefault(chunk_id, dict(row))
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + retrieval_query.weight / (rank + 1)
+                matched_queries.setdefault(chunk_id, []).append(retrieval_query.query_id)
+
+        ranked: list[dict[str, Any]] = []
+        rejected_roles: dict[str, int] = {}
+        for chunk_id, row in fused.items():
+            role = classify_content_role(row)
+            if role in plan.excluded_content_roles or (plan.allowed_content_roles and role not in plan.allowed_content_roles):
+                rejected_roles[role] = rejected_roles.get(role, 0) + 1
+                continue
+            content = str(row.get("content") or "").casefold()
+            task_bonus = self._task_compatibility(plan.intent, role, content)
+            row["content_role"] = role
+            row["matched_queries"] = matched_queries.get(chunk_id, [])
+            row["multi_query_score"] = round(scores[chunk_id], 8)
+            row["task_score"] = round(scores[chunk_id] + task_bonus, 8)
+            ranked.append(row)
+        ranked.sort(
+            key=lambda item: (
+                -float(item.get("task_score") or 0.0),
+                int(item.get("slide_no") or 0),
+                str(item.get("id") or ""),
+            )
+        )
+        selected = self._select_diverse(ranked, top_k, len(document_ids), plan.original_question)
+        return RetrievalResult(
+            selected,
+            f"multi_query:{strategy or self.mode}",
+            " | ".join(item.text for item in plan.retrieval_queries),
+            {
+                "intent": plan.intent,
+                "query_count": len(plan.retrieval_queries),
+                "unique_candidates": len(fused),
+                "eligible_candidates": len(ranked),
+                "rejected_roles": rejected_roles,
+                "queries": query_diagnostics,
+            },
+        )
+
+    @staticmethod
+    def _task_compatibility(intent: str, role: str, content: str) -> float:
+        role_bonus = {
+            "business_fact": 0.4,
+            "management_insight": 0.8,
+            "risk_signal": 1.0,
+            "table": 0.6,
+            "chart": 0.6,
+            "provenance": 0.3,
+            "methodology": -0.8,
+            "boilerplate": -1.5,
+        }.get(role, 0.0)
+        if intent == "negative_signal_summary":
+            markers = (
+                "risk",
+                "concern",
+                "challenge",
+                "pressure",
+                "decline",
+                "below",
+                "warning",
+                "breach",
+                "volatile",
+                "风险",
+                "挑战",
+                "承压",
+                "下降",
+                "下滑",
+                "低于",
+                "阈值",
+                "限额",
+                "波动",
+                "集中",
+                "↑",
+            )
+            return role_bonus + min(3.0, sum(0.45 for marker in markers if marker in content))
+        if intent == "provenance":
+            return 1.5 if role == "provenance" else role_bonus
+        return role_bonus
 
     @staticmethod
     def _select_diverse(

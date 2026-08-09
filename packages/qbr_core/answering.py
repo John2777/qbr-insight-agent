@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .db import Database
+from .evidence import EvidencePackBuilder
+from .query_planning import QueryPlan, RetrievalQuery, deterministic_plan
 from .retrieval import EvidenceRetriever
 from .skill_registry import SkillDescriptor, SkillRegistry
 from .terminology import TermDefinition, find_term
@@ -89,6 +92,17 @@ PERFORMANCE_TERMS = (
 )
 
 
+@dataclass(slots=True)
+class AnswerResult:
+    answer: str
+    evidence: list[dict[str, Any]]
+    warnings: list[str]
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    def legacy(self) -> tuple[str, list[dict[str, Any]], list[str]]:
+        return self.answer, self.evidence, self.warnings
+
+
 class DeterministicAnswerEngine:
     """Evidence selection and replayable business reasoning without model calls."""
 
@@ -104,6 +118,7 @@ class DeterministicAnswerEngine:
         self.retriever = retriever
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
+        self.evidence_builder = EvidencePackBuilder()
 
     def _scope_clause(self, document_ids: list[str]) -> tuple[str, list[Any]]:
         if not document_ids:
@@ -113,22 +128,42 @@ class DeterministicAnswerEngine:
 
     @staticmethod
     def answer_mode(question: str) -> str:
-        if find_term(question) is not None:
-            return "term_definition"
-        if DeterministicAnswerEngine._is_summary_question(question):
-            return "summary"
-        folded = question.casefold()
-        if any(term in folded for term in ("图", "趋势", "走势", "控制图", "折线", "柱状", "chart")):
-            return "chart_analysis"
-        if any(term in folded for term in ("表", "矩阵", "阈值", "排序", "合计", "table")):
-            return "table_analysis"
-        return "evidence_answer"
+        return deterministic_plan(question).intent
 
     def answer(
         self,
         question: str,
         workspace_id: str,
         document_ids: list[str],
+    ) -> tuple[str, list[dict[str, Any]], list[str]]:
+        return self.answer_result(question, workspace_id, document_ids).legacy()
+
+    def answer_result(
+        self,
+        question: str,
+        workspace_id: str,
+        document_ids: list[str],
+        *,
+        plan: QueryPlan | None = None,
+    ) -> AnswerResult:
+        diagnostics: dict[str, Any] = {"query_plan": plan.to_dict() if plan else None}
+        answer, evidence, warnings = self._answer_internal(
+            question,
+            workspace_id,
+            document_ids,
+            plan=plan,
+            diagnostics=diagnostics,
+        )
+        return AnswerResult(answer, evidence, warnings, diagnostics)
+
+    def _answer_internal(
+        self,
+        question: str,
+        workspace_id: str,
+        document_ids: list[str],
+        *,
+        plan: QueryPlan | None,
+        diagnostics: dict[str, Any],
     ) -> tuple[str, list[dict[str, Any]], list[str]]:
         scope_sql, scope_args = self._scope_clause(document_ids)
         with self.db.read() as conn:
@@ -213,6 +248,45 @@ class DeterministicAnswerEngine:
             chart_intent = any(term in question.casefold() for term in ("图", "月度", "控制图", "模拟值", "路径"))
             if ranked and (chart_intent or ranked[0][0] >= 6):
                 return self._chart_answer(question, ranked)
+        if plan is not None:
+            retrieval = self.retriever.search_plan(plan, workspace_id, document_ids, top_k=16)
+            pack = self.evidence_builder.build(plan, retrieval.items, max_atoms=8)
+            diagnostics["retrieval"] = {
+                "strategy": retrieval.strategy,
+                "query": retrieval.query,
+                **retrieval.diagnostics,
+            }
+            diagnostics["evidence_pack"] = pack.to_dict()
+            if plan.execution_profile == "deep" and pack.missing_facets and len(pack.covered_facets) < 2:
+                followup_queries = tuple(
+                    RetrievalQuery(
+                        query_id=f"gap{index}",
+                        text=facet.replace("_", " "),
+                        kind="coverage_gap",
+                        weight=1.1,
+                    )
+                    for index, facet in enumerate(pack.missing_facets[:3], 1)
+                )
+                retry_plan = replace(plan, retrieval_queries=(*plan.retrieval_queries, *followup_queries))
+                retry = self.retriever.search_plan(retry_plan, workspace_id, document_ids, top_k=16)
+                combined = {str(row["id"]): row for row in (*retrieval.items, *retry.items)}
+                retry_pack = self.evidence_builder.build(plan, combined.values(), max_atoms=8)
+                diagnostics["coverage_retry"] = {
+                    "performed": True,
+                    "queries": [item.to_dict() for item in followup_queries],
+                    "retrieval": retry.diagnostics,
+                    "evidence_pack": retry_pack.to_dict(),
+                }
+                if (len(retry_pack.covered_facets), len(retry_pack.atoms)) > (len(pack.covered_facets), len(pack.atoms)):
+                    pack = retry_pack
+                    diagnostics["evidence_pack"] = pack.to_dict()
+            warnings = list(plan.warnings)
+            if not pack.answerable:
+                warnings.append("INSUFFICIENT_EVIDENCE")
+            if pack.answerable and pack.missing_facets:
+                warnings.append("PARTIAL_EVIDENCE_COVERAGE")
+            return pack.render_fallback(plan), pack.evidence, list(dict.fromkeys(warnings))
+
         retrieval = self.retriever.search(question, workspace_id, document_ids, top_k=5)
         chunks = retrieval.items
         if not chunks:

@@ -13,6 +13,7 @@ from .errors import Conflict, InvalidState, ResourceNotFound
 from .ids import new_id
 from .lease import LeaseCoordinator
 from .llm import EvidenceQAAgent
+from .query_planning import QueryPlannerAgent
 from .retrieval import EvidenceRetriever
 from .skill_registry import SkillDescriptor, SkillRegistry
 
@@ -39,6 +40,7 @@ class QAApplicationService:
         skill_registry: SkillRegistry,
         table_reasoning_skill: SkillDescriptor,
         leases: LeaseCoordinator,
+        query_planner: QueryPlannerAgent | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
@@ -47,6 +49,7 @@ class QAApplicationService:
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
         self.leases = leases
+        self.query_planner = query_planner or QueryPlannerAgent()
         self._run_lock = threading.Lock()
         self.answer_engine = DeterministicAnswerEngine(
             db=db,
@@ -307,20 +310,46 @@ class QAApplicationService:
             raise InvalidState("Run has no user question")
         question = str(question_row["content"])
         scope = _loads(run["scope_json"], {})
-        answer_mode = self.answer_engine.answer_mode(question)
+        document_ids = list(scope.get("document_ids", []))
+        history = [dict(row) for row in reversed(history_rows)]
         try:
             with self.db.transaction(immediate=True) as conn:
-                self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "正在检索文档证据"})
-            answer, evidence, warnings = self.answer_engine.answer(
+                self._run_event(conn, run_id, "status", {"node": "query_planning", "message": "正在理解问题并生成检索计划"})
+            plan = self.query_planner.plan(
+                question,
+                history=history,
+                document_ids=document_ids,
+                document_vocabulary=self._document_vocabulary(str(run["workspace_id"]), document_ids),
+            )
+            answer_mode = plan.intent
+            with self.db.transaction(immediate=True) as conn:
+                self._run_event(
+                    conn,
+                    run_id,
+                    "query_plan",
+                    {
+                        "intent": plan.intent,
+                        "profile": plan.execution_profile,
+                        "planner": plan.planner,
+                        "queries": [item.to_dict() for item in plan.retrieval_queries],
+                    },
+                )
+                self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "正在执行多路检索并筛选业务证据"})
+            answer_result = self.answer_engine.answer_result(
                 question,
                 run["workspace_id"],
-                scope.get("document_ids", []),
+                document_ids,
+                plan=plan,
             )
+            answer = answer_result.answer
+            evidence = answer_result.evidence
+            warnings = answer_result.warnings
             model_info: dict[str, Any] = {
                 "provider": self.settings.llm_provider if self.settings.llm_enabled else None,
                 "model": self.settings.llm_model if self.settings.llm_enabled else None,
                 "status": "disabled" if not self.settings.llm_enabled else "skipped_no_evidence",
                 "answer_mode": answer_mode,
+                "planner": plan.planner,
             }
             if self.qa_agent and evidence and answer_mode != "term_definition":
                 with self.db.transaction(immediate=True) as conn:
@@ -329,12 +358,13 @@ class QAApplicationService:
                     question=question,
                     deterministic_answer=answer,
                     evidence=evidence,
-                    history=[dict(row) for row in reversed(history_rows)],
+                    history=history,
                     answer_mode=answer_mode,
+                    query_plan=plan.to_dict(),
                 )
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
-                model_info = {**generated.model, "answer_mode": answer_mode}
+                model_info = {**generated.model, "answer_mode": answer_mode, "planner": plan.planner}
             elif answer_mode == "term_definition":
                 model_info["status"] = "skipped_curated_glossary"
             message_metadata = {
@@ -345,6 +375,10 @@ class QAApplicationService:
                     else "curated_glossary" if answer_mode == "term_definition"
                     else "document_evidence"
                 ),
+                "pipeline_version": "planned-evidence-v1",
+                "query_plan": plan.to_dict(),
+                "retrieval": answer_result.diagnostics.get("retrieval", {}),
+                "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
         except Exception as exc:
@@ -391,7 +425,7 @@ class QAApplicationService:
                     (
                         citation_id, run["assistant_message_id"], index, evidence_item["document_version_id"],
                         evidence_item["slide_id"], evidence_item.get("element_id"), evidence_item.get("chunk_id"),
-                        evidence_item["quote"][:500], self.db.json(evidence_item.get("bbox", {})),
+                        evidence_item["quote"], self.db.json(evidence_item.get("bbox", {})),
                         evidence_item["confidence"], evidence_item["source_kind"],
                     ),
                 )
@@ -407,6 +441,31 @@ class QAApplicationService:
                 (self.db.json(warnings), self.db.json(model_info), utc_now(), run_id),
             )
             self._run_event(conn, run_id, "completed", {"message_id": run["assistant_message_id"]})
+
+    def _document_vocabulary(self, workspace_id: str, document_ids: list[str]) -> list[str]:
+        scope_sql = ""
+        scope_args: list[Any] = []
+        if document_ids:
+            placeholders = ",".join("?" for _ in document_ids)
+            scope_sql = f" AND d.id IN ({placeholders})"
+            scope_args.extend(document_ids)
+        with self.db.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT d.title document_title,s.title slide_title
+                FROM slides s JOIN document_versions dv ON dv.id=s.document_version_id
+                JOIN documents d ON d.id=dv.document_id
+                WHERE d.workspace_id=? AND d.deleted_at IS NULL
+                  AND s.parser_run_id=dv.active_parser_run_id {scope_sql}
+                ORDER BY d.updated_at DESC,s.slide_no LIMIT 80
+                """,
+                (workspace_id, *scope_args),
+            ).fetchall()
+        terms: list[str] = []
+        for row in rows:
+            for value in (row["document_title"], row["slide_title"]):
+                terms.extend(re.findall(r"[A-Za-z][A-Za-z0-9&/_-]{1,40}|[\u4e00-\u9fff]{2,16}", str(value or "")))
+        return list(dict.fromkeys(terms))[:120]
 
     def _run_event(self, conn: sqlite3.Connection, run_id: str, event_type: str, data: dict[str, Any]) -> None:
         conn.execute(

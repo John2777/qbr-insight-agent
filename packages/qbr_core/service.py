@@ -14,12 +14,14 @@ from typing import Any
 from .config import Settings
 from .db import Database, utc_now
 from .errors import Conflict, InvalidState, ResourceNotFound
+from .evidence import classify_content_role
 from .ids import new_id
 from .lease import LeaseCoordinator, LeasePolicy
 from .llm import EvidenceQAAgent
 from .parser import ParsedElement, ParsedPresentation, ParsedSlide, parse_presentation, render_slides, thumbnail_path_for
 from .purge import DocumentPurgeService
 from .qa_service import QAApplicationService
+from .query_planning import QueryPlannerAgent
 from .retrieval import EvidenceRetriever
 from .security import OOXML_MIME, inspect_pptx
 from .skill_registry import (
@@ -97,6 +99,7 @@ class QBRService:
         )
         self.document_purges = DocumentPurgeService(settings, self.db, self.retriever.rebuild_workspace)
         self.qa_agent = EvidenceQAAgent(settings) if settings.llm_configured else None
+        self.query_planner = QueryPlannerAgent(self.qa_agent.model if self.qa_agent is not None else None)
         self.qa_service = QAApplicationService(
             settings=settings,
             db=self.db,
@@ -105,6 +108,7 @@ class QBRService:
             skill_registry=self.skill_registry,
             table_reasoning_skill=self.table_reasoning_skill,
             leases=self.leases,
+            query_planner=self.query_planner,
         )
 
     def health(self) -> dict[str, Any]:
@@ -571,7 +575,11 @@ class QBRService:
             return None
         chunk_id = new_id("chunk")
         digest = hashlib.sha256(content.encode()).hexdigest()
-        metadata = {"element_type": chunk_type, "parser_run_id": None}
+        metadata = {
+            "element_type": chunk_type,
+            "content_role": classify_content_role({"chunk_type": chunk_type, "content": content}),
+            "parser_run_id": None,
+        }
         conn.execute(
             "INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,1)",
             (

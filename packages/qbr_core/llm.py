@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
 from typing import Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -11,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
+from .verification import ClaimEvidenceVerifier
 
 SYSTEM_PROMPT = """你是 QBR Insight Agent，一个受控的企业文档证据问答助手。
 
@@ -40,6 +39,7 @@ class QAState(TypedDict, total=False):
     warnings: list[str]
     model: dict[str, Any]
     answer_mode: str
+    query_plan: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -59,20 +59,6 @@ def _message_text(message: AIMessage) -> str:
         elif isinstance(item, dict) and item.get("type") in {"text", "output_text"}:
             parts.append(str(item.get("text", "")))
     return "".join(parts).strip()
-
-
-def _normalized_numbers(text: str) -> set[tuple[str, bool]]:
-    text = re.sub(r"\[\d+\]", "", text)
-    values: set[tuple[str, bool]] = set()
-    for match in re.finditer(r"(?<![\w])[-+]?\d+(?:\.\d+)?\s*%?", text):
-        raw = match.group(0).strip()
-        percent = raw.endswith("%")
-        try:
-            number = Decimal(raw.rstrip("%").strip()).normalize()
-        except InvalidOperation:
-            continue
-        values.add((format(number, "f"), percent))
-    return values
 
 
 class EvidenceQAAgent:
@@ -99,6 +85,7 @@ class EvidenceQAAgent:
         graph.add_edge("generate", "verify")
         graph.add_edge("verify", END)
         self.graph = graph.compile()
+        self.verifier = ClaimEvidenceVerifier()
 
     def answer(
         self,
@@ -108,6 +95,7 @@ class EvidenceQAAgent:
         evidence: list[dict[str, Any]],
         history: list[dict[str, str]],
         answer_mode: str = "evidence_answer",
+        query_plan: dict[str, Any] | None = None,
     ) -> LLMAnswer:
         result = self.graph.invoke(
             {
@@ -116,6 +104,7 @@ class EvidenceQAAgent:
                 "evidence": evidence,
                 "history": history[-6:],
                 "answer_mode": answer_mode,
+                "query_plan": query_plan or {"intent": answer_mode},
                 "warnings": [],
                 "model": {},
             }
@@ -139,6 +128,7 @@ class EvidenceQAAgent:
         user_prompt = (
             f"用户问题：\n{state['question']}\n\n"
             f"回答类型：{state.get('answer_mode', 'evidence_answer')}\n\n"
+            f"查询计划（只用于约束意图、范围和覆盖面）：\n{state.get('query_plan', {})}\n\n"
             f"最近会话（仅作指代上下文，不是证据）：\n{history_text}\n\n"
             f"已验证结果（其中计算值已经由确定性工具完成）：\n{state['deterministic_answer']}\n\n"
             f"编号证据：\n{evidence_text}\n\n"
@@ -184,18 +174,13 @@ class EvidenceQAAgent:
                 warnings.append("LLM_EMPTY_OR_OVERSIZED_RESPONSE")
             return {"answer": fallback, "warnings": warnings}
 
-        references = {int(value) for value in re.findall(r"\[(\d+)\]", candidate)}
-        valid_references = set(range(1, len(state["evidence"]) + 1))
-        if not references or not references.issubset(valid_references):
-            warnings.append("LLM_CITATION_VALIDATION_FAILED")
-            return {"answer": fallback, "warnings": warnings}
-
-        allowed_corpus = fallback + "\n" + "\n".join(
-            f"{item.get('document_title', '')} {item.get('slide_no', '')} {item.get('quote', '')}"
-            for item in state["evidence"]
+        verification = self.verifier.verify(
+            candidate,
+            fallback=fallback,
+            evidence=state["evidence"],
+            query_plan=state.get("query_plan"),
         )
-        introduced_numbers = _normalized_numbers(candidate) - _normalized_numbers(allowed_corpus)
-        if introduced_numbers:
-            warnings.append("LLM_NUMERIC_VALIDATION_FAILED")
-            return {"answer": fallback, "warnings": warnings}
+        warnings.extend(verification.warnings)
+        if not verification.accepted:
+            return {"answer": fallback, "warnings": list(dict.fromkeys(warnings))}
         return {"answer": candidate, "warnings": warnings}

@@ -60,11 +60,11 @@ def test_term_definition_run_persists_presentation_metadata(tmp_path: Path) -> N
 
     assert "Value of New Business" in run["message"]["content"]
     assert run["citations"] == []
-    assert run["message"]["metadata"] == {
-        "answer_mode": "term_definition",
-        "show_visuals": False,
-        "knowledge_source": "curated_glossary",
-    }
+    assert run["message"]["metadata"]["answer_mode"] == "term_definition"
+    assert run["message"]["metadata"]["show_visuals"] is False
+    assert run["message"]["metadata"]["knowledge_source"] == "curated_glossary"
+    assert run["message"]["metadata"]["pipeline_version"] == "planned-evidence-v1"
+    assert run["message"]["metadata"]["query_plan"]["intent"] == "term_definition"
     assert history["messages"][-1]["metadata"]["show_visuals"] is False
     assert run["model"]["status"] == "skipped_curated_glossary"
 

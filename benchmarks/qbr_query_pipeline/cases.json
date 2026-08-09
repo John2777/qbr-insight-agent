@@ -1,0 +1,223 @@
+{
+  "dataset": "qbr-query-pipeline",
+  "version": "1.0.0",
+  "description": "Bilingual intent, query-expansion, constraint-preservation and content-policy regression cases for QBR retrieval planning.",
+  "cases": [
+    {
+      "id": "plan-001",
+      "question": "what is the bad news in this ppt",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "en",
+      "required_query_terms": ["risk concentration", "风险"],
+      "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-002",
+      "question": "这份PPT的主要风险是什么？",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "zh",
+      "required_query_terms": ["risk concentration", "风险"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-003",
+      "question": "What are the risks in this deck?",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "en",
+      "required_query_terms": ["below target", "挑战"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-004",
+      "question": "哪些指标承压，管理层应该关注什么？",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "zh",
+      "required_query_terms": ["warning threshold", "承压"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-005",
+      "question": "What should management worry about in the presentation?",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "en",
+      "required_query_terms": ["management concern", "风险"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-006",
+      "question": "Summarize the key takeaways from this QBR.",
+      "expected_intent": "summary",
+      "expected_language": "en",
+      "required_query_terms": ["executive summary", "执行摘要"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-007",
+      "question": "请概括这份季度业务回顾的核心结论。",
+      "expected_intent": "summary",
+      "expected_language": "zh",
+      "required_query_terms": ["key takeaways", "核心结论"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-008",
+      "question": "Which data sources are official and which are synthetic?",
+      "expected_intent": "provenance",
+      "expected_language": "en",
+      "required_query_terms": ["official sources", "公开披露"],
+      "excluded_roles": ["boilerplate"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-009",
+      "question": "哪些数据是公开披露，哪些是模拟数据？",
+      "expected_intent": "provenance",
+      "expected_language": "zh",
+      "required_query_terms": ["synthetic illustrative", "数据来源"],
+      "excluded_roles": ["boilerplate"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-010",
+      "question": "Show the monthly sales trend.",
+      "expected_intent": "chart_analysis",
+      "expected_language": "en",
+      "required_query_terms": ["revenue sales"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-011",
+      "question": "月度销售走势如何？",
+      "expected_intent": "chart_analysis",
+      "expected_language": "zh",
+      "required_query_terms": ["月度销售走势"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-012",
+      "question": "请分析风险阈值表中超过限额的项目。",
+      "expected_intent": "table_analysis",
+      "expected_language": "zh",
+      "required_query_terms": ["风险阈值表中超过限额的项目"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-013",
+      "question": "Rank the markets in the operating matrix.",
+      "expected_intent": "table_analysis",
+      "expected_language": "en",
+      "required_query_terms": ["operating matrix"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-014",
+      "question": "VONB是什么含义，解释一下。",
+      "expected_intent": "term_definition",
+      "expected_language": "zh",
+      "required_query_terms": ["value of new business", "新业务价值"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-015",
+      "question": "What does CER mean in a QBR?",
+      "expected_intent": "term_definition",
+      "expected_language": "en",
+      "required_query_terms": ["constant exchange rates", "固定汇率"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-016",
+      "question": "How did sales perform in Q2 2025?",
+      "expected_intent": "evidence_answer",
+      "expected_language": "en",
+      "required_query_terms": ["revenue sales", "q2", "2025"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": ["2025", "Q2"]
+    },
+    {
+      "id": "plan-017",
+      "question": "2025年第二季度利润增长多少？",
+      "expected_intent": "evidence_answer",
+      "expected_language": "zh",
+      "required_query_terms": ["profit earnings", "2025年"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": ["2025年", "第二季度"]
+    },
+    {
+      "id": "plan-018",
+      "question": "资本配置和预算偏差有多大？",
+      "expected_intent": "evidence_answer",
+      "expected_language": "zh",
+      "required_query_terms": ["capital solvency", "target budget"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-019",
+      "question": "What are the key challenges overall?",
+      "expected_intent": "negative_signal_summary",
+      "expected_language": "en",
+      "required_query_terms": ["deteriorating trend", "挑战"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-020",
+      "question": "What is the source and synthetic-data boundary?",
+      "expected_intent": "provenance",
+      "expected_language": "en",
+      "required_query_terms": ["official sources", "口径 边界"],
+      "excluded_roles": ["boilerplate"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-021",
+      "question": "Compare the Q1 and Q2 trend in the chart.",
+      "expected_intent": "chart_analysis",
+      "expected_language": "en",
+      "required_query_terms": ["q1", "q2"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": ["Q1", "Q2"]
+    },
+    {
+      "id": "plan-022",
+      "question": "阈值矩阵里哪项最低？",
+      "expected_intent": "table_analysis",
+      "expected_language": "zh",
+      "required_query_terms": ["阈值矩阵里哪项最低"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-023",
+      "question": "13M Persistency是什么意思？",
+      "expected_intent": "term_definition",
+      "expected_language": "zh",
+      "required_query_terms": ["13-month persistency", "13个月继续率"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-024",
+      "question": "Did customer retention improve in FY2025?",
+      "expected_intent": "evidence_answer",
+      "expected_language": "en",
+      "required_query_terms": ["customer retention persistency", "fy2025"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": ["FY2025"]
+    }
+  ]
+}
