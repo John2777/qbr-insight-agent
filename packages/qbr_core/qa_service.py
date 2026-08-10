@@ -9,6 +9,8 @@ from typing import Any
 
 from .answering import DeterministicAnswerEngine
 from .config import Settings
+from .conversation_context import ConversationContextAssembler
+from .conversation_summary import ConversationSummaryService
 from .db import Database, utc_now
 from .errors import Conflict, InvalidState, ResourceNotFound
 from .ids import new_id
@@ -53,6 +55,7 @@ class QAApplicationService:
         table_reasoning_skill: SkillDescriptor,
         leases: LeaseCoordinator,
         query_planner: QueryPlannerAgent | None = None,
+        summary_model: Any | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
@@ -63,6 +66,18 @@ class QAApplicationService:
         self.table_reasoning_skill = table_reasoning_skill
         self.leases = leases
         self.query_planner = query_planner or QueryPlannerAgent()
+        self.context_assembler = ConversationContextAssembler(
+            max_turns=settings.conversation_context_max_turns,
+            token_budget=settings.conversation_context_token_budget,
+            summary_token_budget=settings.conversation_summary_token_budget,
+        )
+        self.summary_service = ConversationSummaryService(
+            db,
+            max_recent_turns=settings.conversation_context_max_turns,
+            model=summary_model if settings.conversation_summary_enabled else None,
+            provider=settings.llm_provider if summary_model is not None else None,
+            model_name=(settings.planner_model or settings.llm_model) if summary_model is not None else None,
+        )
         self._run_lock = threading.Lock()
         self.answer_engine = DeterministicAnswerEngine(
             db=db,
@@ -110,7 +125,10 @@ class QAApplicationService:
             ).fetchone()
             if not row:
                 raise ResourceNotFound("Conversation not found")
-            messages = conn.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at", (conversation_id,)).fetchall()
+            messages = conn.execute(
+                "SELECT * FROM messages WHERE conversation_id=? ORDER BY sequence_no",
+                (conversation_id,),
+            ).fetchall()
             message_data = []
             for message in messages:
                 item = dict(message)
@@ -136,7 +154,7 @@ class QAApplicationService:
                      count(m.id) message_count,max(m.created_at) last_message_at,
                      (SELECT latest.content FROM messages latest
                        WHERE latest.conversation_id=c.id AND latest.role='user'
-                       ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1) last_question
+                       ORDER BY latest.sequence_no DESC LIMIT 1) last_question
                    FROM conversations c LEFT JOIN messages m ON m.conversation_id=c.id
                    WHERE c.workspace_id=? AND c.user_id=?
                    GROUP BY c.id
@@ -246,23 +264,50 @@ class QAApplicationService:
                         "events_url": f"/api/v1/runs/{existing['id']}/events",
                         "reused": True,
                     }
+            user_sequence = int(
+                conn.execute(
+                    "SELECT coalesce(max(sequence_no),0)+1 FROM messages WHERE conversation_id=?",
+                    (conversation_id,),
+                ).fetchone()[0]
+            )
+            assistant_sequence = user_sequence + 1
             conn.execute(
-                """INSERT INTO messages(id,conversation_id,role,content,status,run_id,metadata_json,created_at)
-                   VALUES (?,?,?,?,?,NULL,'{}',?)""",
-                (user_message_id, conversation_id, "user", content, "completed", now),
+                """INSERT INTO messages(
+                     id,conversation_id,role,content,status,run_id,metadata_json,sequence_no,created_at
+                   ) VALUES (?,?,?,?,?,NULL,'{}',?,?)""",
+                (user_message_id, conversation_id, "user", content, "completed", user_sequence, now),
             )
             conn.execute(
-                """INSERT INTO messages(id,conversation_id,role,content,status,run_id,metadata_json,created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (assistant_message_id, conversation_id, "assistant", "", "running", run_id, "{}", now),
+                """INSERT INTO messages(
+                     id,conversation_id,role,content,status,run_id,metadata_json,sequence_no,created_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (assistant_message_id, conversation_id, "assistant", "", "running", run_id, "{}", assistant_sequence, now),
             )
             conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             conn.execute(
                 """INSERT INTO runs(
-                     id,workspace_id,conversation_id,assistant_message_id,status,warning_json,model_json,
-                     created_at,completed_at,client_message_id
-                   ) VALUES (?,?,?,?,?,'[]','{}',?,NULL,?)""",
-                (run_id, workspace_id, conversation_id, assistant_message_id, "pending", now, client_message_id),
+                     id,workspace_id,conversation_id,user_message_id,assistant_message_id,context_cutoff_sequence,
+                     status,warning_json,model_json,created_at,completed_at,client_message_id
+                   ) VALUES (?,?,?,?,?,?,?,'[]','{}',?,NULL,?)""",
+                (
+                    run_id,
+                    workspace_id,
+                    conversation_id,
+                    user_message_id,
+                    assistant_message_id,
+                    user_sequence,
+                    "pending",
+                    now,
+                    client_message_id,
+                ),
+            )
+            self.context_assembler.load_or_create(
+                conn,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                current_user_message_id=user_message_id,
+                cutoff_sequence=user_sequence,
+                created_at=now,
             )
             self._run_event(conn, run_id, "queued", {"run_id": run_id})
         return {
@@ -282,7 +327,7 @@ class QAApplicationService:
                 run = conn.execute(
                     """SELECT * FROM runs
                        WHERE attempts < ? AND (status='pending' OR (status='running' AND lease_expires_at < ?))
-                       ORDER BY created_at LIMIT 1""",
+                       ORDER BY created_at,rowid LIMIT 1""",
                     (self.settings.job_max_attempts, now),
                 ).fetchone()
                 if not run:
@@ -303,37 +348,69 @@ class QAApplicationService:
             self._run_lock.release()
 
     def process_run(self, run_id: str) -> None:
-        with self.db.read() as conn:
+        with self.db.transaction(immediate=True) as conn:
             run = conn.execute(
-                """SELECT r.*,c.scope_json,c.user_id,m.created_at assistant_created_at
+                """SELECT r.*,c.scope_json,c.user_id,m.sequence_no assistant_sequence
                    FROM runs r JOIN conversations c ON c.id=r.conversation_id
                    JOIN messages m ON m.id=r.assistant_message_id WHERE r.id=?""",
                 (run_id,),
             ).fetchone()
             if not run:
                 raise ResourceNotFound("Run not found")
+            current_user_message_id = run["user_message_id"]
+            if not current_user_message_id:
+                legacy_user = conn.execute(
+                    """SELECT id,sequence_no FROM messages
+                       WHERE conversation_id=? AND role='user' AND sequence_no<?
+                       ORDER BY sequence_no DESC LIMIT 1""",
+                    (run["conversation_id"], run["assistant_sequence"]),
+                ).fetchone()
+                if not legacy_user:
+                    raise InvalidState("Run has no user question")
+                current_user_message_id = str(legacy_user["id"])
+                cutoff_sequence = int(legacy_user["sequence_no"])
+                conn.execute(
+                    "UPDATE runs SET user_message_id=?,context_cutoff_sequence=? WHERE id=?",
+                    (current_user_message_id, cutoff_sequence, run_id),
+                )
+            else:
+                cutoff_sequence = int(run["context_cutoff_sequence"] or 0)
             question_row = conn.execute(
-                """SELECT content FROM messages WHERE conversation_id=? AND role='user' AND created_at<=?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (run["conversation_id"], run["assistant_created_at"]),
+                """SELECT content,sequence_no FROM messages
+                   WHERE id=? AND conversation_id=? AND role='user'""",
+                (current_user_message_id, run["conversation_id"]),
             ).fetchone()
-            history_rows = conn.execute(
-                """SELECT role,content FROM messages WHERE conversation_id=? AND status='completed'
-                   ORDER BY created_at DESC LIMIT 8""",
-                (run["conversation_id"],),
-            ).fetchall()
+            if not question_row:
+                raise InvalidState("Run has no user question")
+            if cutoff_sequence < 1:
+                cutoff_sequence = int(question_row["sequence_no"])
+                conn.execute("UPDATE runs SET context_cutoff_sequence=? WHERE id=?", (cutoff_sequence, run_id))
+            context = self.context_assembler.load_or_create(
+                conn,
+                run_id=run_id,
+                conversation_id=str(run["conversation_id"]),
+                current_user_message_id=str(current_user_message_id),
+                cutoff_sequence=cutoff_sequence,
+                created_at=str(run["created_at"]),
+            )
         if not question_row:
             raise InvalidState("Run has no user question")
         question = str(question_row["content"])
         scope = _loads(run["scope_json"], {})
         document_ids = list(scope.get("document_ids", []))
-        history = [dict(row) for row in reversed(history_rows)]
+        history = context.history_list()
         try:
             with self.db.transaction(immediate=True) as conn:
-                self._run_event(conn, run_id, "status", {"node": "query_planning", "message": "Understanding the question and building a retrieval plan"})
+                self._run_event(
+                    conn,
+                    run_id,
+                    "status",
+                    {"node": "query_planning", "message": "Understanding the question and building a retrieval plan"},
+                )
             plan = self.query_planner.plan(
                 question,
                 history=history,
+                conversation_summary=context.summary,
                 document_ids=document_ids,
                 document_vocabulary=self._document_vocabulary(str(run["workspace_id"]), document_ids),
                 run_id=run_id,
@@ -354,7 +431,12 @@ class QAApplicationService:
                         "queries": [item.to_dict() for item in plan.retrieval_queries],
                     },
                 )
-                self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "Searching multiple sources and selecting business evidence"})
+                self._run_event(
+                    conn,
+                    run_id,
+                    "status",
+                    {"node": "retrieval", "message": "Searching multiple sources and selecting business evidence"},
+                )
             answer_result = self.answer_engine.answer_result(
                 question,
                 run["workspace_id"],
@@ -383,6 +465,7 @@ class QAApplicationService:
                     safe_fallback=answer,
                     evidence=evidence,
                     history=history,
+                    conversation_summary=context.summary,
                     task_frame=plan.to_dict(),
                     run_id=run_id,
                 )
@@ -401,8 +484,15 @@ class QAApplicationService:
                 "verified_calculation": answer_result.diagnostics.get("verified_calculation"),
                 "verified_calculation_facts": answer_result.diagnostics.get("verified_calculation_facts", []),
                 "verification": verification_info,
+                "conversation_context": {
+                    **context.diagnostics,
+                    "original_question": question,
+                    "canonical_question": plan.canonical_question,
+                },
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
+            if self.settings.conversation_summary_enabled:
+                self.summary_service.refresh_safely(str(run["conversation_id"]), run_id=run_id)
         except Exception as exc:
             with self.db.transaction(immediate=True) as conn:
                 current = conn.execute("SELECT attempts FROM runs WHERE id=?", (run_id,)).fetchone()

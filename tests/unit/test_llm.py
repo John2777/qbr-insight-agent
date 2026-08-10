@@ -169,6 +169,25 @@ def test_generation_prompt_uses_task_frame_without_fixed_summary_template(tmp_pa
     assert "negative_signal_summary" not in prompt
 
 
+def test_generation_prompt_marks_structured_summary_as_non_evidence(tmp_path: Path) -> None:
+    model = FakeModel("ACME 的收入需要依据文档证据判断。[1]")
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
+
+    result = agent.answer(
+        question="它怎么样？",
+        grounding_context="ACME revenue improved [1]",
+        evidence=[{**evidence()[0], "quote": "ACME revenue improved"}],
+        history=[],
+        conversation_summary={"entities": ["ACME"], "conversation_goals": ["分析收入"]},
+        task_frame=task_frame("它怎么样？"),
+    )
+
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.messages or [])
+    assert result.answer == "ACME 的收入需要依据文档证据判断。[1]"
+    assert '"entities":["ACME"]' in prompt
+    assert "不能作为业务事实证据" in prompt
+
+
 def test_deepseek_answer_client_explicitly_disables_thinking(tmp_path: Path) -> None:
     with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
         build_chat_model(settings_at(tmp_path), "deepseek-v4-flash", thinking_enabled=False)

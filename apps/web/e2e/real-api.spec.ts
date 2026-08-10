@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { resolvePythonExecutable } from "./python-executable";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
+const pythonExecutable = resolvePythonExecutable(projectRoot);
 
 type SkillStatus = { name: string; kind: string; loaded: boolean };
 
@@ -17,7 +19,7 @@ async function skillStatus(page: import("@playwright/test").Page): Promise<Skill
 function createSyntheticPresentation(outputPath: string) {
   const fixtureScript = resolve(projectRoot, "skills/extract-ppt-chart-data/scripts/self_test.py");
   execFileSync(
-    resolve(projectRoot, ".venv/bin/python"),
+    pythonExecutable,
     [
       "-c",
       [

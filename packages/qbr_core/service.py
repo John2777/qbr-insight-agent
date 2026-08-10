@@ -106,6 +106,7 @@ class QBRService:
             table_reasoning_skill=self.table_reasoning_skill,
             leases=self.leases,
             query_planner=self.query_planner,
+            summary_model=planner_model,
         )
         self.ingestion = IngestionService(self)
         self.persistence = ParsedPersistenceService(self)

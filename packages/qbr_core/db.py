@@ -11,7 +11,7 @@ from typing import Any
 
 from .ids import new_id
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 
 
 def utc_now() -> str:
@@ -127,14 +127,37 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, run_id TEXT,
-  metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+  metadata_json TEXT NOT NULL DEFAULT '{}', sequence_no INTEGER NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL,
-  assistant_message_id TEXT NOT NULL, status TEXT NOT NULL, warning_json TEXT NOT NULL DEFAULT '[]',
+  user_message_id TEXT REFERENCES messages(id), assistant_message_id TEXT NOT NULL,
+  context_cutoff_sequence INTEGER, status TEXT NOT NULL, warning_json TEXT NOT NULL DEFAULT '[]',
   model_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, completed_at TEXT,
   started_at TEXT, lease_owner TEXT, lease_expires_at TEXT, attempts INTEGER NOT NULL DEFAULT 0,
   error_detail TEXT, client_message_id TEXT
+);
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  through_sequence INTEGER NOT NULL,
+  summary_version TEXT NOT NULL,
+  summary_json TEXT NOT NULL,
+  source_context_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  model_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  UNIQUE(conversation_id, through_sequence, summary_version)
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_summaries_latest
+  ON conversation_summaries(conversation_id, summary_version, through_sequence DESC);
+CREATE TABLE IF NOT EXISTS run_context_snapshots (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  context_version TEXT NOT NULL, current_user_message_id TEXT NOT NULL REFERENCES messages(id),
+  cutoff_sequence INTEGER NOT NULL, summary_id TEXT, summary_json TEXT NOT NULL DEFAULT '{}',
+  summary_through_sequence INTEGER NOT NULL DEFAULT 0,
+  history_json TEXT NOT NULL, diagnostics_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS run_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id),
@@ -230,8 +253,23 @@ class Database:
         message_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
         if "metadata_json" not in message_columns:
             conn.execute("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+        if "sequence_no" not in message_columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN sequence_no INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                """UPDATE messages SET sequence_no=(
+                     SELECT count(*) FROM messages earlier
+                     WHERE earlier.conversation_id=messages.conversation_id
+                       AND (earlier.created_at<messages.created_at OR
+                            (earlier.created_at=messages.created_at AND earlier.rowid<=messages.rowid))
+                   )"""
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_conversation_sequence ON messages(conversation_id,sequence_no)"
+        )
         run_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
         additions = {
+            "user_message_id": "TEXT REFERENCES messages(id)",
+            "context_cutoff_sequence": "INTEGER",
             "model_json": "TEXT NOT NULL DEFAULT '{}'",
             "started_at": "TEXT",
             "lease_owner": "TEXT",
@@ -248,6 +286,66 @@ class Database:
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_client_message
                ON runs(conversation_id,client_message_id) WHERE client_message_id IS NOT NULL"""
         )
+        conn.execute(
+            """UPDATE runs SET user_message_id=(
+                 SELECT user_message.id
+                 FROM messages assistant_message JOIN messages user_message
+                   ON user_message.conversation_id=assistant_message.conversation_id
+                  AND user_message.role='user'
+                  AND user_message.sequence_no<assistant_message.sequence_no
+                 WHERE assistant_message.id=runs.assistant_message_id
+                 ORDER BY user_message.sequence_no DESC LIMIT 1
+               ) WHERE user_message_id IS NULL"""
+        )
+        conn.execute(
+            """UPDATE runs SET context_cutoff_sequence=(
+                 SELECT sequence_no FROM messages WHERE id=runs.user_message_id
+               ) WHERE context_cutoff_sequence IS NULL AND user_message_id IS NOT NULL"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS conversation_summaries (
+                 id TEXT PRIMARY KEY,
+                 conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                 through_sequence INTEGER NOT NULL,
+                 summary_version TEXT NOT NULL,
+                 summary_json TEXT NOT NULL,
+                 source_context_hash TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 model_json TEXT NOT NULL DEFAULT '{}',
+                 created_at TEXT NOT NULL,
+                 UNIQUE(conversation_id, through_sequence, summary_version)
+               )"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_conversation_summaries_latest
+               ON conversation_summaries(conversation_id, summary_version, through_sequence DESC)"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS run_context_snapshots (
+                 run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+                 context_version TEXT NOT NULL,
+                 current_user_message_id TEXT NOT NULL REFERENCES messages(id),
+                 cutoff_sequence INTEGER NOT NULL,
+                 summary_id TEXT,
+                 summary_json TEXT NOT NULL DEFAULT '{}',
+                 summary_through_sequence INTEGER NOT NULL DEFAULT 0,
+                 history_json TEXT NOT NULL,
+                 diagnostics_json TEXT NOT NULL,
+                 context_hash TEXT NOT NULL,
+                 created_at TEXT NOT NULL
+               )"""
+        )
+        snapshot_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(run_context_snapshots)").fetchall()
+        }
+        snapshot_additions = {
+            "summary_id": "TEXT",
+            "summary_json": "TEXT NOT NULL DEFAULT '{}'",
+            "summary_through_sequence": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for name, definition in snapshot_additions.items():
+            if name not in snapshot_columns:
+                conn.execute(f"ALTER TABLE run_context_snapshots ADD COLUMN {name} {definition}")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS review_revisions (
                  id TEXT PRIMARY KEY, review_task_id TEXT NOT NULL REFERENCES review_tasks(id),

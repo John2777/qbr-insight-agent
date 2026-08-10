@@ -103,6 +103,10 @@ LLM_MODEL=qwen3.7-plus
 PLANNER_MODEL=qwen3.6-flash
 DEEP_LLM_MODEL=qwen3.7-max
 LLM_MAX_TOKENS=2000
+CONVERSATION_CONTEXT_MAX_TURNS=4
+CONVERSATION_CONTEXT_TOKEN_BUDGET=2400
+CONVERSATION_SUMMARY_ENABLED=true
+CONVERSATION_SUMMARY_TOKEN_BUDGET=800
 
 RETRIEVAL_STRATEGY=hybrid
 EMBEDDING_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
@@ -124,6 +128,8 @@ VISION_ENRICH_ALL_SLIDES=false
 未单独设置 `EMBEDDING_API_KEY`、`RERANK_API_KEY` 或 `VISION_API_KEY` 时会复用服务端 `LLM_API_KEY`。默认只分析含图片元素的页面，并受 `VISION_MAX_SLIDES` 成本上限保护；显式设置 `VISION_ENRICH_ALL_SLIDES=true` 才分析整份演示文稿。视觉模型生成 `slide_visual_summary`、`visual_ocr`、`visual_observation` 三类可审计 chunk；它们标记为补充视觉证据，不能覆盖原生表格/图表数值。Embedding 身份包含 endpoint、模型与配置维度，任一配置变化都会安全重建旧向量。
 
 语义规划器要求输出紧凑 JSON，因此应用会显式关闭该角色的 thinking；答案角色同样关闭 thinking，把 token 预算留给可见、可校验的正文。四份测试 PPT 的复杂题验证表明，千问答案上限使用 `LLM_MAX_TOKENS=2000` 可避免 1200-token 配置下的长答案截断。
+
+每个回答 run 在入队事务中绑定本轮用户消息，并冻结当时的结构化摘要与已完成的最近对话轮次。默认保留最近 4 个完整问答轮次，摘要最多约 800 token，摘要与近期原文合计最多约 2400 token。更早的完整轮次会增量压缩为目标、实体、时间范围、术语、已解析指代、待解决问题和用户偏好；摘要只用于指代消解和对话连贯，不能作为业务证据，回答仍必须重新检索文档。摘要版本、截止序号、预算、截断状态和 context hash 会写入冻结快照及回答 metadata，便于重试复现和审计；摘要模型失败时保留确定性摘要，不影响已完成回答。
 
 ## 验证
 

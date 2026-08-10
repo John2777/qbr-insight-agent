@@ -27,8 +27,10 @@ class PlannerModel:
         self.finish_reason = finish_reason
         self.output_tokens = output_tokens
         self.reasoning_tokens = reasoning_tokens
+        self.messages: Any = None
 
-    def invoke(self, _messages: Any) -> AIMessage:
+    def invoke(self, messages: Any) -> AIMessage:
+        self.messages = messages
         if isinstance(self.content, Exception):
             raise self.content
         metadata: dict[str, Any] = {}
@@ -170,6 +172,19 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
     assert plan.hard_constraints == ("2025", "Q2")
     assert plan.retrieval_queries[0].kind == "literal"
     assert "2025年第二季度" in corpus
+
+
+def test_planner_prompt_uses_structured_summary_only_for_reference_resolution() -> None:
+    model = PlannerModel(json.dumps({"task_summary": "Resolve it from evidence."}))
+
+    QueryPlannerAgent(model).plan(
+        "它怎么样？",
+        conversation_summary={"entities": ["ACME"], "conversation_goals": ["分析收入"]},
+    )
+
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.messages or [])
+    assert '"entities":["ACME"]' in prompt
+    assert "reference resolution only, never business evidence" in prompt
 
 
 def test_llm_planner_accepts_multi_part_goal_without_collapsing_to_one_category() -> None:

@@ -3,9 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolvePythonExecutable } from "./e2e/python-executable";
 
 const webRoot = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(webRoot, "../..");
+const pythonExecutable = resolvePythonExecutable(projectRoot);
 const e2eDataDir = mkdtempSync(join(tmpdir(), "qbr-playwright-"));
 const inheritedEnv = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
@@ -23,7 +25,7 @@ export default defineConfig({
   webServer: [
     {
       name: "api",
-      command: `${resolve(projectRoot, ".venv/bin/python")} -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8010`,
+      command: `${JSON.stringify(pythonExecutable)} -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8010`,
       cwd: projectRoot,
       env: {
         ...inheritedEnv,

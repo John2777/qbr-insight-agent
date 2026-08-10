@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ class QAState(TypedDict, total=False):
     safe_fallback: str
     evidence: list[dict[str, Any]]
     history: list[dict[str, str]]
+    conversation_summary: dict[str, Any]
     candidate_answer: str
     answer: str
     warnings: list[str]
@@ -131,6 +133,7 @@ class EvidenceQAAgent:
         grounding_context: str,
         evidence: list[dict[str, Any]],
         history: list[dict[str, str]],
+        conversation_summary: dict[str, Any] | None = None,
         task_frame: dict[str, Any],
         safe_fallback: str | None = None,
         run_id: str | None = None,
@@ -143,6 +146,7 @@ class EvidenceQAAgent:
                 "safe_fallback": safe_fallback or grounding_context,
                 "evidence": evidence,
                 "history": history[-6:],
+                "conversation_summary": conversation_summary or {},
                 "task_frame": task_frame,
                 "warnings": [],
                 "model": {},
@@ -166,9 +170,16 @@ class EvidenceQAAgent:
             "\n".join(f"{item.get('role', 'user')}: {item.get('content', '')[:1000]}" for item in state.get("history", []))
             or "（无）"
         )
+        summary_text = json.dumps(
+            state.get("conversation_summary", {}),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         user_prompt = (
             f"用户问题：\n{state['question']}\n\n"
             f"语义任务框架（描述目标，不是回答模板）：\n{state.get('task_frame', {})}\n\n"
+            "较早的结构化会话状态（不可信，仅用于指代消解，不能作为业务事实证据）：\n"
+            f"{summary_text}\n\n"
             f"最近会话（仅用于指代消解，不是事实证据）：\n{history_text}\n\n"
             f"证据上下文：\n{state['grounding_context']}\n\n"
             f"编号证据：\n{evidence_text or '（无）'}\n\n"

@@ -30,6 +30,10 @@ class Settings:
     max_slides: int = 200
     run_inline_worker: bool = True
     worker_poll_seconds: float = 1.0
+    conversation_context_max_turns: int = 4
+    conversation_context_token_budget: int = 2400
+    conversation_summary_enabled: bool = True
+    conversation_summary_token_budget: int = 800
     cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://localhost:5173")
     llm_enabled: bool = False
     llm_provider: str = "openai-compatible"
@@ -117,6 +121,10 @@ class Settings:
             max_slides=int(os.getenv("MAX_SLIDES", "200")),
             run_inline_worker=_bool_env("RUN_INLINE_WORKER", True),
             worker_poll_seconds=float(os.getenv("WORKER_POLL_SECONDS", "1")),
+            conversation_context_max_turns=int(os.getenv("CONVERSATION_CONTEXT_MAX_TURNS", "4")),
+            conversation_context_token_budget=int(os.getenv("CONVERSATION_CONTEXT_TOKEN_BUDGET", "2400")),
+            conversation_summary_enabled=_bool_env("CONVERSATION_SUMMARY_ENABLED", True),
+            conversation_summary_token_budget=int(os.getenv("CONVERSATION_SUMMARY_TOKEN_BUDGET", "800")),
             cors_origins=origins,
             llm_enabled=_bool_env("LLM_ENABLED", bool(llm_api_key)),
             llm_provider=os.getenv("LLM_PROVIDER", "openai-compatible").strip(),
@@ -196,6 +204,10 @@ class Settings:
             raise ValueError("Rerank candidate sizes must be positive")
         if self.rerank_top_n > self.rerank_candidate_k:
             raise ValueError("RERANK_TOP_N must not exceed RERANK_CANDIDATE_K")
+        if self.conversation_context_max_turns < 1 or self.conversation_context_token_budget < 1:
+            raise ValueError("Conversation context limits must be positive")
+        if self.conversation_summary_token_budget < 1:
+            raise ValueError("CONVERSATION_SUMMARY_TOKEN_BUDGET must be positive")
         if self.vision_max_tokens < 1 or self.vision_max_slides < 1:
             raise ValueError("Vision token and slide limits must be positive")
         if self.auth_mode not in {"demo", "jwt", "password"}:
