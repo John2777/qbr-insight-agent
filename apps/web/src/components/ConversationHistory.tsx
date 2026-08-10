@@ -7,7 +7,7 @@ import type { ConversationSummary } from "../types";
 function formatActivity(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export function ConversationHistory() {
@@ -35,7 +35,7 @@ export function ConversationHistory() {
   }, [location.pathname]);
 
   const deleteConversation = async (item: ConversationSummary) => {
-    if (!window.confirm(`确定删除“${item.title}”的完整问答记录吗？此操作不可恢复。`)) return;
+    if (!window.confirm(`Delete the complete Q&A history for “${item.title}”? This action cannot be undone.`)) return;
     setDeletingId(item.id);
     setDeleteError("");
     try {
@@ -45,15 +45,15 @@ export function ConversationHistory() {
       if (location.pathname === `/chat/${item.id}`) navigate("/chat", { replace: true });
     } catch (error) {
       setDeleteError(error instanceof ApiError && error.status === 409
-        ? "该回答仍在生成中，暂时无法删除。"
-        : "删除失败，请稍后重试。");
+        ? "This answer is still being generated and cannot be deleted yet."
+        : "Delete failed. Try again later.");
     } finally {
       setDeletingId(null);
     }
   };
 
   return <section className="conversation-history" aria-labelledby="conversation-history-title">
-    <header><h2 id="conversation-history-title">历史问答</h2><span>最近 {items.length} 条</span></header>
+    <header><h2 id="conversation-history-title">Q&A History</h2><span>Latest {items.length}</span></header>
     <div className="conversation-history-list">
       {items.map((item) => <div className="conversation-history-item" key={item.id}>
         <NavLink
@@ -62,13 +62,13 @@ export function ConversationHistory() {
           title={item.title}
         >
           <div><strong>{item.title}</strong><time dateTime={item.last_activity_at}>{formatActivity(item.last_activity_at)}</time></div>
-          <small>{item.last_question || "暂无提问"}</small>
+          <small>{item.last_question || "No question yet"}</small>
         </NavLink>
         <button
           className={deletingId === item.id ? "conversation-history-delete deleting" : "conversation-history-delete"}
           type="button"
-          aria-label={`删除会话：${item.title}`}
-          title="删除这条问答"
+          aria-label={`Delete conversation: ${item.title}`}
+          title="Delete this Q&A"
           disabled={deletingId !== null}
           onClick={() => void deleteConversation(item)}
         >
@@ -76,8 +76,8 @@ export function ConversationHistory() {
         </button>
       </div>)}
       {deleteError && <p className="conversation-history-error" role="alert">{deleteError}</p>}
-      {loaded && !items.length && <p className="conversation-history-empty">暂无历史问答</p>}
-      {!loaded && <p className="conversation-history-empty">正在加载…</p>}
+      {loaded && !items.length && <p className="conversation-history-empty">No Q&A history</p>}
+      {!loaded && <p className="conversation-history-empty">Loading…</p>}
     </div>
   </section>;
 }

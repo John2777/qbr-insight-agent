@@ -9,6 +9,19 @@ from typing import Any
 class VerifiedCalculation:
     text: str
     evidence: tuple[dict[str, Any], ...]
+    facts: tuple[dict[str, Any], ...] = ()
+
+
+def _numeric_identity(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "metric": row.get("series_name"),
+        "period": row.get("category"),
+        "value": float(row["y_value"]),
+        "display_value": _format_value(row),
+        "unit": row.get("unit"),
+        "basis": row.get("basis"),
+        "source_type": row.get("source_kind") or "native_chart_point",
+    }
 
 
 def _point_evidence(row: dict[str, Any]) -> dict[str, Any]:
@@ -35,6 +48,7 @@ def _point_evidence(row: dict[str, Any]) -> dict[str, Any]:
         "content_role": "chart",
         "facet": "verified calculation",
         "extraction": "native_chart_calculation",
+        "numeric_identity": _numeric_identity(row),
     }
 
 
@@ -65,7 +79,7 @@ class ChartCalculator:
             return None
         row = candidates[0]
         text = f"{row.get('series_name')}: {row.get('category')}={_format_value(row)}. [1]"
-        return VerifiedCalculation(text, (_point_evidence(row),))
+        return VerifiedCalculation(text, (_point_evidence(row),), (_numeric_identity(row),))
 
     @staticmethod
     def _period_change(question: str, rows: list[dict[str, Any]]) -> VerifiedCalculation | None:
@@ -99,7 +113,18 @@ class ChartCalculator:
             f"{end.get('category')}={_format_value(end)}; absolute change={absolute:g}; "
             f"relative change={relative_text}. [1][2]"
         )
-        return VerifiedCalculation(text, (_point_evidence(start), _point_evidence(end)))
+        facts = (
+            _numeric_identity(start),
+            _numeric_identity(end),
+            {
+                "operation": "period_change",
+                "metric": end.get("series_name"),
+                "absolute_change": absolute,
+                "relative_change_percent": relative,
+                "basis": "derived_from_chart_points",
+            },
+        )
+        return VerifiedCalculation(text, (_point_evidence(start), _point_evidence(end)), facts)
 
     @staticmethod
     def _series_comparison(question: str, rows: list[dict[str, Any]]) -> VerifiedCalculation | None:
@@ -126,4 +151,15 @@ class ChartCalculator:
             f"{first.get('series_name')}={_format_value(first)}; {second.get('series_name')}={_format_value(second)}; "
             f"higher series={high.get('series_name')}; difference={difference:g}. [1][2]"
         )
-        return VerifiedCalculation(text, (_point_evidence(first), _point_evidence(second)))
+        facts = (
+            _numeric_identity(first),
+            _numeric_identity(second),
+            {
+                "operation": "series_comparison",
+                "higher_metric": high.get("series_name"),
+                "difference": difference,
+                "unit": high.get("unit") or low.get("unit"),
+                "basis": "derived_from_chart_points",
+            },
+        )
+        return VerifiedCalculation(text, (_point_evidence(first), _point_evidence(second)), facts)

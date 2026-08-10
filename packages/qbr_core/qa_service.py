@@ -330,7 +330,7 @@ class QAApplicationService:
         history = [dict(row) for row in reversed(history_rows)]
         try:
             with self.db.transaction(immediate=True) as conn:
-                self._run_event(conn, run_id, "status", {"node": "query_planning", "message": "正在理解问题并生成检索计划"})
+                self._run_event(conn, run_id, "status", {"node": "query_planning", "message": "Understanding the question and building a retrieval plan"})
             plan = self.query_planner.plan(
                 question,
                 history=history,
@@ -354,7 +354,7 @@ class QAApplicationService:
                         "queries": [item.to_dict() for item in plan.retrieval_queries],
                     },
                 )
-                self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "正在执行多路检索并筛选业务证据"})
+                self._run_event(conn, run_id, "status", {"node": "retrieval", "message": "Searching multiple sources and selecting business evidence"})
             answer_result = self.answer_engine.answer_result(
                 question,
                 run["workspace_id"],
@@ -376,7 +376,7 @@ class QAApplicationService:
             selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
             if selected_agent:
                 with self.db.transaction(immediate=True) as conn:
-                    self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
+                    self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "Generating an evidence-based answer"})
                 generated = selected_agent.answer(
                     question=question,
                     grounding_context=answer_result.grounding_context or answer,
@@ -393,11 +393,13 @@ class QAApplicationService:
             message_metadata = {
                 "show_visuals": plan.needs_visuals,
                 "knowledge_source": "document_evidence",
-                "pipeline_version": "semantic-task-frame-v1",
+                "pipeline_version": "semantic-task-frame-v2-typed-coverage",
                 "query_plan": plan.to_dict(),
                 "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
+                "verified_calculation": answer_result.diagnostics.get("verified_calculation"),
+                "verified_calculation_facts": answer_result.diagnostics.get("verified_calculation_facts", []),
                 "verification": verification_info,
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
@@ -413,7 +415,7 @@ class QAApplicationService:
                 if not retrying:
                     conn.execute(
                         "UPDATE messages SET status='failed',content=? WHERE id=?",
-                        ("回答生成失败，请稍后重试。", run["assistant_message_id"]),
+                        ("Answer generation failed. Try again later.", run["assistant_message_id"]),
                     )
                 self._run_event(
                     conn,

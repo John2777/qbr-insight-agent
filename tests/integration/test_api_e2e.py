@@ -94,6 +94,50 @@ def test_cross_workspace_ids_are_not_enumerable(tmp_path: Path, synthetic_pptx: 
     assert response.json()["code"] == "RESOURCE_NOT_FOUND"
 
 
+def test_multi_part_coverage_is_exposed_end_to_end_and_not_hidden_by_calculation(
+    tmp_path: Path,
+    synthetic_pptx: Path,
+) -> None:
+    app = create_app(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False))
+    with TestClient(app) as client:
+        with synthetic_pptx.open("rb") as source:
+            uploaded = client.post(
+                "/api/v1/documents",
+                files={
+                    "file": (
+                        "coverage-qbr.pptx",
+                        source,
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    )
+                },
+            ).json()
+        assert app.state.service.process_next_job("coverage-worker") == uploaded["job"]["id"]
+
+        conversation = client.post(
+            "/api/v1/conversations",
+            json={"title": "Coverage check", "document_ids": [uploaded["document"]["id"]]},
+        ).json()
+        sent = client.post(
+            f"/api/v1/conversations/{conversation['id']}/messages",
+            json={"content": "How much did Revenue and Margin grow? Which product lines drive growth?"},
+        ).json()
+        assert app.state.service.process_next_run("coverage-worker") == sent["run_id"]
+
+        run = client.get(f"/api/v1/runs/{sent['run_id']}").json()
+        coverage = run["message"]["metadata"]["evidence_pack"]["coverage"]
+        assert "PARTIAL_EVIDENCE_COVERAGE" in run["warnings"]
+        assert coverage["total"] == 3
+        assert coverage["supported"] == 2
+        assert coverage["gap_labels"] == ["Which product lines drive growth"]
+        assert coverage["facets"][-1]["status"] == "unsupported"
+        assert "The current sources do not yet support: Which product lines drive growth" in run["message"]["content"]
+
+        recent = client.get("/api/v1/analytics/summary").json()["recent_runs"][0]
+        assert recent["id"] == sent["run_id"]
+        assert recent["evidence_coverage"] == coverage
+        assert recent["warning_details"][0]["label"] == "Some details lack source support"
+
+
 def test_document_purge_removes_derived_data_and_is_idempotent(tmp_path: Path, synthetic_pptx: Path) -> None:
     settings = Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False)
     app = create_app(settings)

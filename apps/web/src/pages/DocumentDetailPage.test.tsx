@@ -35,7 +35,7 @@ function renderPage() {
     <MemoryRouter initialEntries={["/documents/doc_1"]}>
       <Routes>
         <Route path="/documents/:documentId" element={<DocumentDetailPage />} />
-        <Route path="/documents" element={<div>文档列表</div>} />
+        <Route path="/documents" element={<div>Document list</div>} />
       </Routes>
     </MemoryRouter>
   );
@@ -55,13 +55,13 @@ describe("single document purge", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "彻底删除" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Permanently delete" }));
 
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("此操作不可恢复"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("cannot be undone"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/documents/doc_1/purge");
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "DELETE" });
-    expect(await screen.findByText("文档列表")).toBeInTheDocument();
+    expect(await screen.findByText("Document list")).toBeInTheDocument();
   });
 
   it("does not call the endpoint when confirmation is cancelled", async () => {
@@ -70,7 +70,7 @@ describe("single document purge", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "彻底删除" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Permanently delete" }));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -89,7 +89,7 @@ describe("slide preview loading", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    const secondThumbnail = await screen.findByAltText("第 2 页缩略图");
+    const secondThumbnail = await screen.findByAltText("Slide 2 thumbnail");
     expect(secondThumbnail).toHaveAttribute("src", "/thumbnail/2");
     expect(secondThumbnail).toHaveAttribute("loading", "lazy");
     expect(secondThumbnail).toHaveAttribute("decoding", "async");
@@ -97,12 +97,12 @@ describe("slide preview loading", () => {
     fireEvent.click(screen.getByText("Second").closest("button")!);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("第 2 页预览")).toBeInTheDocument();
+      expect(screen.getByLabelText("Slide 2 preview")).toBeInTheDocument();
     });
     fireEvent.click(screen.getByText("First").closest("button")!);
-    await waitFor(() => expect(screen.getByLabelText("第 1 页预览")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Slide 1 preview")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Second").closest("button")!);
-    await waitFor(() => expect(screen.getByLabelText("第 2 页预览")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Slide 2 preview")).toBeInTheDocument());
 
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/v1/slides/slide_1")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/v1/slides/slide_2")).toHaveLength(1);

@@ -3,7 +3,7 @@ import { statusLabel } from "./api";
 
 describe("statusLabel", () => {
   it("uses human-readable Chinese labels and preserves unknown states", () => {
-    expect(statusLabel("ready")).toBe("可查询");
+    expect(statusLabel("ready")).toBe("Ready");
     expect(statusLabel("custom")).toBe("custom");
   });
 });

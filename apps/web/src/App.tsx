@@ -21,7 +21,7 @@ export function App() {
     try { await api("/api/v1/auth/logout", { method: "POST" }); }
     finally { window.localStorage.removeItem("qbr_api_token"); setAuthState("anonymous"); }
   }
-  if (authState === "checking") return <div className="auth-loading"><span className="spinner"/><p>正在验证会话…</p></div>;
+  if (authState === "checking") return <div className="auth-loading"><span className="spinner"/><p>Verifying your session…</p></div>;
   if (authState === "anonymous") return <LoginPage onAuthenticated={() => setAuthState("authenticated")} />;
   return (
     <div className="app-shell">
@@ -30,14 +30,14 @@ export function App() {
           <span className="brand-mark">Q</span>
           <div><strong>QBR Insight</strong><small>Evidence-first agent</small></div>
         </div>
-        <nav aria-label="主导航">
-          <NavLink to="/documents">文档库</NavLink>
-          <NavLink to="/chat">智能问答</NavLink>
-          <NavLink to="/reviews">待复核</NavLink>
-          <NavLink to="/analytics">运行分析</NavLink>
+        <nav aria-label="Main navigation">
+          <NavLink to="/documents">Document Library</NavLink>
+          <NavLink to="/chat">Ask QBR</NavLink>
+          <NavLink to="/reviews">Reviews</NavLink>
+          <NavLink to="/analytics">Analytics</NavLink>
         </nav>
         <ConversationHistory />
-        <div className="sidebar-note"><span className="status-dot" /> 已验证会话<br/><small>证据不出当前工作区</small><button onClick={() => void logout()}>退出登录</button></div>
+        <div className="sidebar-note"><span className="status-dot" /> Verified session<br/><small>Evidence stays within this workspace</small><button onClick={() => void logout()}>Sign out</button></div>
       </aside>
       <main className="main-content">
         <Routes>

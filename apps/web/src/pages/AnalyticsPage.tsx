@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, statusLabel } from "../api";
 import { CONVERSATIONS_CHANGED_EVENT } from "../conversationEvents";
 
 type Analytics = {
@@ -10,10 +10,12 @@ type Analytics = {
   recent_runs: Array<{
     id: string;
     title: string;
+    question?: string;
     status: string;
     created_at: string;
     warnings: string[];
     warning_details?: WarningDetail[];
+    evidence_coverage?: EvidenceCoverage | null;
   }>;
 };
 
@@ -25,11 +27,20 @@ type WarningDetail = {
   description: string;
 };
 
+type EvidenceCoverage = {
+  total: number;
+  supported: number;
+  partial: number;
+  coverage_ratio: number;
+  has_gaps: boolean;
+  gap_labels: string[];
+};
+
 const LEGACY_WARNING_LABELS: Record<string, Pick<WarningDetail, "severity" | "label">> = {
-  SYNTHETIC_DATA_SIGNAL: { severity: "info", label: "文档含模拟数据" },
-  INSUFFICIENT_EVIDENCE: { severity: "warning", label: "证据不足" },
-  QUERY_PLANNER_PROVIDER_ERROR: { severity: "degraded", label: "查询规划已降级" },
-  LLM_PROVIDER_ERROR: { severity: "degraded", label: "模型生成已降级" },
+  SYNTHETIC_DATA_SIGNAL: { severity: "info", label: "Document contains synthetic data" },
+  INSUFFICIENT_EVIDENCE: { severity: "warning", label: "Insufficient evidence" },
+  QUERY_PLANNER_PROVIDER_ERROR: { severity: "degraded", label: "Query planning degraded" },
+  LLM_PROVIDER_ERROR: { severity: "degraded", label: "Model generation degraded" },
 };
 
 function detailsFor(run: Analytics["recent_runs"][number]): WarningDetail[] {
@@ -37,8 +48,8 @@ function detailsFor(run: Analytics["recent_runs"][number]): WarningDetail[] {
   return run.warnings.map((code) => ({
     code,
     category: "legacy",
-    description: "运行诊断信号；部署后端新版本后可查看完整说明。",
-    ...(LEGACY_WARNING_LABELS[code] ?? { severity: "warning" as const, label: "运行提示" }),
+    description: "Run diagnostic signal. Deploy the latest backend to see the full description.",
+    ...(LEGACY_WARNING_LABELS[code] ?? { severity: "warning" as const, label: "Run notice" }),
   }));
 }
 
@@ -58,32 +69,36 @@ export function AnalyticsPage() {
       window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, load);
     };
   }, []);
-  if (!data) return <div className="loading">正在加载分析指标…</div>;
+  if (!data) return <div className="loading">Loading analytics…</div>;
   const documentTotal = Object.values(data.documents).reduce((sum, value) => sum + value, 0);
   const completionRate = data.runs.total ? Math.round(data.runs.completed / data.runs.total * 100) : 0;
-  return <section className="page"><header className="page-header"><div><span className="eyebrow">OPERATIONS & QUALITY</span><h1>运行分析</h1><p>用真实运行数据展示问答质量、延迟、知识缺口和复核状态。</p></div></header>
+  return <section className="page"><header className="page-header"><div><span className="eyebrow">OPERATIONS & QUALITY</span><h1>Run Analytics</h1><p>Monitor answer quality, latency, knowledge gaps, and review status using live run data.</p></div></header>
     <div className="metric-grid">
-      <article><span>可用文档</span><strong>{documentTotal}</strong><small>{Object.entries(data.documents).map(([key, value]) => `${key} ${value}`).join(" · ") || "暂无"}</small></article>
-      <article><span>回答完成率</span><strong>{completionRate}%</strong><small>{data.runs.completed}/{data.runs.total} 已完成 · {data.runs.degraded ?? 0} 次自动降级</small></article>
-      <article><span>平均端到端延迟</span><strong>{Math.round(data.runs.avg_latency_ms)} ms</strong><small>排队至完成</small></article>
-      <article><span>证据不足</span><strong>{data.runs.no_evidence}</strong><small>安全拒答次数</small></article>
-      <article><span>待复核</span><strong>{(data.reviews.pending ?? 0) + (data.reviews.in_review ?? 0)}</strong><small>低置信图表</small></article>
-      <article><span>正向反馈</span><strong>{data.feedback.positive_rate === null ? "—" : `${Math.round(data.feedback.positive_rate * 100)}%`}</strong><small>{data.feedback.total} 条反馈</small></article>
+      <article><span>Available documents</span><strong>{documentTotal}</strong><small>{Object.entries(data.documents).map(([key, value]) => `${statusLabel(key)} ${value}`).join(" · ") || "None"}</small></article>
+      <article><span>Answer completion rate</span><strong>{completionRate}%</strong><small>{data.runs.completed}/{data.runs.total} completed · {data.runs.degraded ?? 0} automatic fallbacks</small></article>
+      <article><span>Average end-to-end latency</span><strong>{Math.round(data.runs.avg_latency_ms)} ms</strong><small>Queue to completion</small></article>
+      <article><span>Insufficient evidence</span><strong>{data.runs.no_evidence}</strong><small>Safe refusals</small></article>
+      <article><span>Pending reviews</span><strong>{(data.reviews.pending ?? 0) + (data.reviews.in_review ?? 0)}</strong><small>Low-confidence charts</small></article>
+      <article><span>Positive feedback</span><strong>{data.feedback.positive_rate === null ? "—" : `${Math.round(data.feedback.positive_rate * 100)}%`}</strong><small>{data.feedback.total} feedback items</small></article>
     </div>
-    <div className="section-title"><h2>最近问答运行</h2><span>{data.recent_runs.length} 条</span></div>
+    <div className="section-title"><h2>Recent Q&A Runs</h2><span>{data.recent_runs.length} {data.recent_runs.length === 1 ? "run" : "runs"}</span></div>
     <div className="run-list">{data.recent_runs.map((run) => {
       const warningDetails = detailsFor(run);
       return <article key={run.id}>
-        <div className="run-summary"><strong>{run.title}</strong><small>{new Date(run.created_at).toLocaleString()}</small></div>
-        <span className={`status ${run.status === "completed" ? "ready" : run.status}`}>{run.status === "completed" ? "已完成" : run.status}</span>
-        {warningDetails.length > 0 && <div className="run-signals" aria-label="运行提示">
+        <div className="run-summary"><strong>{run.question || run.title}</strong><small>{new Date(run.created_at).toLocaleString("en-US")}</small></div>
+        <span className={`status ${run.status === "completed" ? "ready" : run.status}`}>{statusLabel(run.status)}</span>
+        {warningDetails.length > 0 && <div className="run-signals" aria-label="Run notices">
           {warningDetails.map((warning) => <span
             className={`run-signal ${warning.severity}`}
             key={warning.code}
             title={`${warning.description} (${warning.code})`}
           >{warning.label}</span>)}
         </div>}
+        {run.evidence_coverage?.has_gaps && <div className="run-coverage-detail" aria-label="Source support details">
+          <strong>{run.evidence_coverage.supported} of {run.evidence_coverage.total} answer points supported</strong>
+          <small>Not found in current sources: {run.evidence_coverage.gap_labels.join(" · ")}</small>
+        </div>}
       </article>;
-    })}{!data.recent_runs.length && <div className="empty">完成第一条问答后，这里会出现运行记录。</div>}</div>
+    })}{!data.recent_runs.length && <div className="empty">Run history will appear here after your first completed Q&A.</div>}</div>
   </section>;
 }

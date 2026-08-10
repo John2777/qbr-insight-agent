@@ -132,7 +132,7 @@ function AnswerChart({ chart, citation, onCitation }: {
   const datasets = chart.series.slice(0, 6).map((series, index) => {
     const percentage = series.points.some((point) => point.display_value?.includes("%"));
     return {
-      label: series.name || `系列 ${index + 1}`,
+      label: series.name || `Series ${index + 1}`,
       data: labels.map((label) => series.points.find((point) => point.category === label)?.y_value ?? null),
       borderColor: COLORS[index % COLORS.length],
       backgroundColor: `${COLORS[index % COLORS.length]}cc`,
@@ -158,7 +158,7 @@ function AnswerChart({ chart, citation, onCitation }: {
   };
   const useLine = chart.chart_types.some((type) => type.toLowerCase().includes("line")) || labels.length > 6;
   return <section className="answer-visual-card">
-    <header><div><span>趋势图</span><h4>{chart.title || "关键指标趋势"}</h4></div>{citation && <button onClick={() => onCitation(citation)}>{citation.label} 第 {citation.slide_no} 页</button>}</header>
+    <header><div><span>Trend chart</span><h4>{chart.title || "Key metric trend"}</h4></div>{citation && <button onClick={() => onCitation(citation)}>{citation.label} · Slide {citation.slide_no}</button>}</header>
     <div className="answer-chart">{useLine ? <Line data={data as ChartData<"line", (number | null)[], string>} options={options as ChartOptions<"line">}/> : <Bar data={data as ChartData<"bar", (number | null)[], string>} options={options as ChartOptions<"bar">}/>}</div>
   </section>;
 }
@@ -197,7 +197,7 @@ export function AssistantAnswer({ content, citations, onCitation, showVisuals = 
       {tables.map(({ rows, slide }) => {
         const source = citations.find((item) => item.slide_id === slide.id);
         return <section className="answer-visual-card" key={`table-${slide.id}`}>
-          <header><div><span>数据表</span><h4>{slide.title || "关键指标"}</h4></div>{source && <button onClick={() => onCitation(source)}>{source.label} 第 {source.slide_no} 页</button>}</header>
+          <header><div><span>Data table</span><h4>{slide.title || "Key metrics"}</h4></div>{source && <button onClick={() => onCitation(source)}>{source.label} · Slide {source.slide_no}</button>}</header>
           <div className="native-table-wrap"><table className="native-table"><thead><tr>{rows[0].map((cell, index) => <th key={index}>{cell}</th>)}</tr></thead><tbody>{rows.slice(1, 11).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>
         </section>;
       })}

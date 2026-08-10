@@ -59,35 +59,35 @@ test("real browser uploads, answers with citations, and purges one presentation"
 
   const documentCard = page.locator(`a[href="/documents/${uploaded.document.id}"]`);
   await expect(documentCard).toBeVisible();
-  await expect(documentCard.getByText(/可查询|部分可用/)).toBeVisible({ timeout: 60_000 });
+  await expect(documentCard.getByText(/Ready|Partially available/)).toBeVisible({ timeout: 60_000 });
 
   const ingestedSkills = await skillStatus(page);
   expect(ingestedSkills.find((skill) => skill.kind === "ParserSkill")?.loaded).toBe(true);
   expect(ingestedSkills.find((skill) => skill.kind === "ReasoningSkill")?.loaded).toBe(false);
 
   await page.goto(`/chat?document=${uploaded.document.id}`);
-  const question = page.getByLabel("问题");
+  const question = page.getByLabel("Question");
   await expect(question).toBeEnabled();
-  await question.fill("Q2 Revenue 是多少？");
-  await page.getByRole("button", { name: "发送" }).click();
+  await question.fill("What was Q2 revenue?");
+  await page.getByRole("button", { name: "Send" }).click();
 
   const answer = page.locator(".assistant-answer");
   await expect(answer).toContainText("20", { timeout: 60_000 });
   const citation = answer.getByRole("button", { name: "[1]" }).first();
   await expect(citation).toBeVisible();
   await citation.click();
-  await expect(page.locator(".evidence-pane")).toContainText("第 1 页");
+  await expect(page.locator(".evidence-pane")).toContainText("Slide 1");
 
   await page.goto(`/documents/${uploaded.document.id}`);
   page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("此操作不可恢复");
+    expect(dialog.message()).toContain("cannot be undone");
     await dialog.accept();
   });
   const purgeResponsePromise = page.waitForResponse(
     (response) => response.url().includes(`/api/v1/documents/${uploaded.document.id}/purge`)
       && response.request().method() === "DELETE"
   );
-  await page.getByRole("button", { name: "彻底删除" }).click();
+  await page.getByRole("button", { name: "Permanently delete" }).click();
   expect((await purgeResponsePromise).status()).toBe(200);
   await expect(page).toHaveURL(/\/documents$/);
   await expect(page.locator(`a[href="/documents/${uploaded.document.id}"]`)).toHaveCount(0);

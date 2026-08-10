@@ -71,7 +71,7 @@ class DeterministicAnswerEngine:
         pack = self.evidence_builder.build(task, retrieval.items, max_atoms=8)
         missing_documents = pack.diagnostics.get("missing_document_ids", [])
         if task.execution_profile == "deep" and (
-            (pack.missing_facets and len(pack.covered_facets) < 2) or missing_documents
+            (pack.coverage.has_gaps and pack.coverage.supported_count < 2) or missing_documents
         ):
             retrieval, pack = self._retry_missing_evidence(task, workspace_id, document_ids, retrieval, pack)
 
@@ -79,11 +79,13 @@ class DeterministicAnswerEngine:
             question,
             self._load_chart_rows(workspace_id, document_ids),
         )
+        if calculation is not None:
+            pack = self.evidence_builder.with_additional_evidence(task, pack, calculation.evidence)
         evidence = self._merge_evidence(calculation, pack.evidence)
         warnings = list(task.warnings)
         if not pack.answerable and calculation is None:
             warnings.append("INSUFFICIENT_EVIDENCE")
-        elif (pack.missing_facets or pack.diagnostics.get("missing_document_ids")) and calculation is None:
+        elif pack.coverage.has_gaps or pack.diagnostics.get("missing_document_ids"):
             warnings.append("PARTIAL_EVIDENCE_COVERAGE")
         diagnostics = {
             "query_plan": task.to_dict(),
@@ -95,6 +97,7 @@ class DeterministicAnswerEngine:
             "retrieval": {"strategy": retrieval.strategy, "query": retrieval.query, **retrieval.diagnostics},
             "evidence_pack": pack.to_dict(),
             "verified_calculation": calculation.text if calculation else None,
+            "verified_calculation_facts": list(calculation.facts) if calculation else [],
         }
         grounding_context = self._render_grounding_context(task, evidence, calculation)
         safe_answer = self._render_safe_fallback(task, evidence, calculation, pack)
@@ -150,7 +153,7 @@ class DeterministicAnswerEngine:
     ) -> tuple[RetrievalResult, EvidencePack]:
         followups = tuple(
             RetrievalQuery(f"gap{index}", requirement, "evidence_gap", 1.1)
-            for index, requirement in enumerate(pack.missing_facets[:3], 1)
+            for index, requirement in enumerate(pack.coverage.gap_labels[:3], 1)
         )
         retry_plan = replace(plan, retrieval_queries=(*plan.retrieval_queries, *followups))
         retry = self.retriever.search_plan(retry_plan, workspace_id, document_ids, top_k=16)
@@ -158,12 +161,12 @@ class DeterministicAnswerEngine:
         retry_pack = self.evidence_builder.build(plan, combined.values(), max_atoms=8)
         retry_quality = (
             len(retry_pack.diagnostics.get("covered_document_ids", [])),
-            len(retry_pack.covered_facets),
+            retry_pack.coverage.supported_count,
             len(retry_pack.atoms),
         )
         current_quality = (
             len(pack.diagnostics.get("covered_document_ids", [])),
-            len(pack.covered_facets),
+            pack.coverage.supported_count,
             len(pack.atoms),
         )
         if retry_quality > current_quality:
@@ -313,12 +316,19 @@ class DeterministicAnswerEngine:
 
         if plan.answer_language == "zh":
             heading = "基于当前可核验证据，可以确认："
-            limitation = "\n\n证据覆盖仍不完整，以上仅保留当前文档能够直接支持的内容。" if pack.missing_facets else ""
+            gaps = "、".join(pack.coverage.gap_labels[:3])
+            limitation = (
+                f"\n\n当前资料暂未支持以下内容：{gaps}。其余回答仅保留当前文档能够直接确认的内容。"
+                if pack.coverage.has_gaps
+                else ""
+            )
         else:
             heading = "Based on the currently verifiable evidence:"
             limitation = (
-                "\n\nEvidence coverage remains incomplete; only directly supported content is retained."
-                if pack.missing_facets
+                "\n\nThe current sources do not yet support: "
+                + "; ".join(pack.coverage.gap_labels[:3])
+                + ". The rest of the answer includes only content directly supported by the documents."
+                if pack.coverage.has_gaps
                 else ""
             )
         return heading + "\n\n" + "\n".join(lines) + limitation

@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from .coverage import CoverageResult, build_evidence_contract, evaluate_evidence_coverage, facet_ids_for_evidence
 from .query_planning import QueryPlan
 
 BOILERPLATE_MARKERS = (
@@ -354,6 +355,7 @@ class EvidenceAtom:
     facet: str
     relevance_score: float
     source: dict[str, Any]
+    facet_ids: tuple[str, ...] = ()
 
     def to_evidence(self) -> dict[str, Any]:
         row = self.source
@@ -371,6 +373,7 @@ class EvidenceAtom:
             "slide_title": row.get("slide_title"),
             "content_role": self.content_role,
             "facet": self.facet,
+            "facet_ids": list(self.facet_ids),
             "evidence_atom_id": self.atom_id,
             "extraction": "semantic_units",
         }
@@ -382,6 +385,7 @@ class EvidencePack:
     covered_facets: tuple[str, ...]
     missing_facets: tuple[str, ...]
     answerable: bool
+    coverage: CoverageResult
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -410,6 +414,7 @@ class EvidencePack:
             "covered_facets": list(self.covered_facets),
             "missing_facets": list(self.missing_facets),
             "answerable": self.answerable,
+            "coverage": self.coverage.to_dict(),
             "diagnostics": self.diagnostics,
         }
 
@@ -510,11 +515,16 @@ class EvidencePackBuilder:
         missing_documents = tuple(document_id for document_id in plan.document_ids if document_id not in covered_documents)
         minimum_atoms = 2 if plan.execution_profile == "deep" else 1
         answerable = len(atoms) >= minimum_atoms
+        contract = build_evidence_contract(plan.original_question)
+        coverage = evaluate_evidence_coverage(contract, atoms)
+        facet_ids = facet_ids_for_evidence(coverage)
+        atoms = [replace(atom, facet_ids=facet_ids.get(atom.atom_id, ())) for atom in atoms]
         return EvidencePack(
             atoms=tuple(atoms),
             covered_facets=covered,
             missing_facets=missing,
             answerable=answerable,
+            coverage=coverage,
             diagnostics={
                 "candidate_count": len(rows),
                 "accepted_count": len(ranked),
@@ -527,3 +537,19 @@ class EvidencePackBuilder:
                 "missing_document_ids": list(missing_documents),
             },
         )
+
+    @staticmethod
+    def with_additional_evidence(
+        plan: QueryPlan,
+        pack: EvidencePack,
+        evidence: Iterable[dict[str, Any]],
+    ) -> EvidencePack:
+        """Re-evaluate the same contract when a deterministic tool adds evidence."""
+
+        coverage = evaluate_evidence_coverage(
+            build_evidence_contract(plan.original_question),
+            [*pack.atoms, *evidence],
+        )
+        facet_ids = facet_ids_for_evidence(coverage)
+        atoms = tuple(replace(atom, facet_ids=facet_ids.get(atom.atom_id, ())) for atom in pack.atoms)
+        return replace(pack, atoms=atoms, coverage=coverage)

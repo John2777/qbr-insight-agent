@@ -134,6 +134,22 @@ def test_dual_axis_resolution_and_verified_multi_series_calculation(tmp_path: Pa
     assert calculation is not None
     assert "$120m" in calculation.text and "$100m" in calculation.text and "difference=20" in calculation.text
     assert len(calculation.evidence) == 2
+    assert calculation.evidence[0]["numeric_identity"] == {
+        "metric": "Revenue",
+        "period": "Q2",
+        "value": 120.0,
+        "display_value": "$120m",
+        "unit": "$m",
+        "basis": None,
+        "source_type": "embedded_workbook",
+    }
+    assert calculation.facts[-1] == {
+        "operation": "series_comparison",
+        "higher_metric": "Revenue",
+        "difference": 20.0,
+        "unit": "$m",
+        "basis": "derived_from_chart_points",
+    }
 
 
 def _seed_chunk(

@@ -23,100 +23,116 @@ _WARNING_CATALOG: dict[str, WarningDescriptor] = {
         code="SYNTHETIC_DATA_SIGNAL",
         severity="info",
         category="data_caveat",
-        label="文档含模拟数据",
-        description="回答引用的页面被文档自身标记为模拟、测试或示例数据；这不是系统故障。",
+        label="Document contains synthetic data",
+        description="The cited pages are marked by the document as synthetic, test, or sample data. This is not a system failure.",
     ),
     "INSUFFICIENT_EVIDENCE": WarningDescriptor(
         code="INSUFFICIENT_EVIDENCE",
         severity="warning",
         category="evidence_quality",
-        label="证据不足",
-        description="当前文档中没有足够的相关业务证据支撑更明确的结论。",
+        label="Insufficient evidence",
+        description="The current documents do not contain enough relevant business evidence to support a more specific conclusion.",
     ),
     "PARTIAL_EVIDENCE_COVERAGE": WarningDescriptor(
         code="PARTIAL_EVIDENCE_COVERAGE",
         severity="warning",
         category="evidence_quality",
-        label="证据覆盖不完整",
-        description="回答已使用可用证据，但问题要求的部分维度没有被文档覆盖。",
+        label="Some details lack source support",
+        description=(
+            "Other parts of the answer remain supported; the current documents do not yet provide the information "
+            "needed for some requested details."
+        ),
     ),
     "NO_COMPARATIVE_STRENGTH_EVIDENCE": WarningDescriptor(
         code="NO_COMPARATIVE_STRENGTH_EVIDENCE",
         severity="warning",
         category="evidence_quality",
-        label="缺少优势对比证据",
-        description="文档缺少足以证明相对优势的目标、历史或同业对比证据。",
+        label="Comparative strength evidence missing",
+        description="The documents lack target, historical, or peer comparisons sufficient to demonstrate a relative strength.",
     ),
     "LOW_CHART_CONFIDENCE": WarningDescriptor(
         code="LOW_CHART_CONFIDENCE",
         severity="warning",
         category="evidence_quality",
-        label="图表识别置信度较低",
-        description="相关图表可以用于辅助判断，但其结构化识别结果需要人工复核。",
+        label="Low chart recognition confidence",
+        description="The related charts can support the analysis, but their structured extraction needs human review.",
     ),
     "QUERY_PLANNER_PROVIDER_ERROR": WarningDescriptor(
         code="QUERY_PLANNER_PROVIDER_ERROR",
         severity="degraded",
         category="provider_fallback",
-        label="查询规划已降级",
-        description="查询规划模型调用失败，系统已使用确定性查询计划继续完成回答。",
+        label="Query planning degraded",
+        description="The query-planning model call failed, so the system used a deterministic retrieval plan to complete the answer.",
     ),
     "QUERY_PLANNER_OUTPUT_INVALID": WarningDescriptor(
         code="QUERY_PLANNER_OUTPUT_INVALID",
         severity="degraded",
         category="provider_fallback",
-        label="查询规划已降级",
-        description="查询规划模型返回了无效结构，系统已使用确定性查询计划继续完成回答。",
+        label="Query planning degraded",
+        description=(
+            "The query-planning model returned an invalid structure, so the system used a deterministic retrieval plan "
+            "to complete the answer."
+        ),
     ),
     "LLM_PROVIDER_ERROR": WarningDescriptor(
         code="LLM_PROVIDER_ERROR",
         severity="degraded",
         category="provider_fallback",
-        label="模型生成已降级",
-        description="回答生成模型调用失败，系统已返回经过验证的确定性证据答案。",
+        label="Model generation degraded",
+        description="The answer-generation model call failed, so the system returned a verified deterministic evidence answer.",
     ),
     "LLM_EMPTY_OR_OVERSIZED_RESPONSE": WarningDescriptor(
         code="LLM_EMPTY_OR_OVERSIZED_RESPONSE",
         severity="degraded",
         category="answer_fallback",
-        label="模型回答已回退",
-        description="模型返回为空或超出安全长度，系统已改用确定性证据答案。",
+        label="Model answer replaced",
+        description="The model response was empty or exceeded the safe length, so the system used a deterministic evidence answer.",
     ),
     "LLM_OUTPUT_TRUNCATED": WarningDescriptor(
         code="LLM_OUTPUT_TRUNCATED",
         severity="degraded",
         category="answer_fallback",
-        label="模型回答被截断",
-        description="模型达到输出长度上限，系统已改用完整的确定性证据答案。",
+        label="Model answer truncated",
+        description="The model reached its output limit, so the system used a complete deterministic evidence answer.",
     ),
     "LLM_CITATION_VALIDATION_FAILED": WarningDescriptor(
         code="LLM_CITATION_VALIDATION_FAILED",
         severity="degraded",
         category="answer_fallback",
-        label="引用校验已处置",
-        description="模型回答的部分引用未通过校验；系统已删除不受支持的局部内容，或改用安全证据答案。",
+        label="Citation validation handled",
+        description="Some citations failed validation. The system removed unsupported content or used a safe evidence answer.",
     ),
     "LLM_NUMERIC_VALIDATION_FAILED": WarningDescriptor(
         code="LLM_NUMERIC_VALIDATION_FAILED",
         severity="degraded",
         category="answer_fallback",
-        label="数字校验已处置",
-        description="模型回答的部分数字事实未通过证据校验；系统已删除不受支持的局部内容，或改用安全证据答案。",
+        label="Numeric validation handled",
+        description=(
+            "Some numeric claims failed evidence validation. The system removed unsupported content or used a safe "
+            "evidence answer."
+        ),
     ),
     "EVIDENCE_ROLE_VALIDATION_FAILED": WarningDescriptor(
         code="EVIDENCE_ROLE_VALIDATION_FAILED",
         severity="degraded",
         category="answer_fallback",
-        label="证据类型校验后已回退",
-        description="模型回答使用了不符合当前问题类型的证据，系统已改用确定性证据答案。",
+        label="Evidence role validation fallback",
+        description="The model used evidence that did not match the question type, so the system used a deterministic evidence answer.",
     ),
     "LLM_QUERY_ADHERENCE_FAILED": WarningDescriptor(
         code="LLM_QUERY_ADHERENCE_FAILED",
         severity="degraded",
         category="answer_fallback",
-        label="问题相关性校验后已回退",
-        description="模型回答偏离了用户问题，系统已改用确定性证据答案。",
+        label="Query relevance validation fallback",
+        description="The model answer drifted from the user's question, so the system used a deterministic evidence answer.",
     ),
+}
+
+_LOCALIZED_WARNING_COPY: dict[tuple[str, str], dict[str, str]] = {
+    ("PARTIAL_EVIDENCE_COVERAGE", "zh"): {
+        "label": "部分内容暂无资料支持",
+        "description": "回答中的其余内容仍有资料支持；当前文档暂未提供问题中部分内容所需的信息。",
+    },
 }
 
 
@@ -128,14 +144,20 @@ def describe_warning(code: str) -> WarningDescriptor:
             code=normalized,
             severity="warning",
             category="uncategorized",
-            label="运行提示",
-            description="该运行产生了尚未分类的诊断信号；请使用代码在服务日志中检索。",
+            label="Run notice",
+            description="This run produced an unclassified diagnostic signal. Use the code to search the service logs.",
         ),
     )
 
 
-def warning_details(codes: list[str]) -> list[dict[str, str]]:
-    return [describe_warning(code).to_dict() for code in dict.fromkeys(codes)]
+def warning_details(codes: list[str], *, language: str = "en") -> list[dict[str, str]]:
+    details: list[dict[str, str]] = []
+    normalized_language = "zh" if language.casefold().startswith("zh") else "en"
+    for code in dict.fromkeys(codes):
+        detail = describe_warning(code).to_dict()
+        detail.update(_LOCALIZED_WARNING_COPY.get((detail["code"], normalized_language), {}))
+        details.append(detail)
+    return details
 
 
 def has_degraded_warning(codes: list[str]) -> bool:

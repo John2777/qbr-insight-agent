@@ -10,11 +10,11 @@ describe("MessageCopyButton", () => {
       value: { writeText }
     });
 
-    render(<MessageCopyButton content={"完整回答\n包含第二行 [1]"} kind="回答"/>);
-    fireEvent.click(screen.getByRole("button", { name: "复制回答" }));
+    render(<MessageCopyButton content={"Complete answer\nwith a second line [1]"} kind="answer"/>);
+    fireEvent.click(screen.getByRole("button", { name: "Copy answer" }));
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("完整回答\n包含第二行 [1]"));
-    expect(screen.getByText("已复制")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "回答已复制" })).toBeInTheDocument();
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Complete answer\nwith a second line [1]"));
+    expect(screen.getByText("Copied")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Answer copied" })).toBeInTheDocument();
   });
 });

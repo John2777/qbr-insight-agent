@@ -11,7 +11,7 @@ test("document evidence workflow is keyboard accessible", async ({ page }) => {
     else await route.fulfill({ status: 202, json: { document: { id: "doc_1" }, job: { id: "job_1" } } });
   });
   await page.goto("/documents");
-  await expect(page.getByRole("heading", { name: "季度业务文档" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Quarterly Business Documents" })).toBeVisible();
   await expect(page.getByText("FY25 Q4 Review")).toBeVisible();
   await page.getByRole("link", { name: /FY25 Q4 Review/ }).focus();
   await expect(page.getByRole("link", { name: /FY25 Q4 Review/ })).toBeFocused();
@@ -21,28 +21,28 @@ test("queued answer is rendered from the SSE stream", async ({ page }) => {
   await mockSession(page);
   let complete = false;
   await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [{ id: "doc_1", title: "FY25 Q4 Review", status: "ready", updated_at: "2026-08-07T00:00:00Z" }] } }));
-  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: complete ? [{ id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, message_count: 2, last_question: "Q2 Revenue 是多少？", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z" }] : [] } }));
+  await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: complete ? [{ id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, message_count: 2, last_question: "What was Q2 revenue?", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z" }] : [] } }));
   await page.route("**/api/v1/conversations", (route) => route.fulfill({ status: 201, json: { id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, messages: [] } }));
   await page.route("**/api/v1/conversations/conv_1/messages", (route) => route.fulfill({ status: 202, json: { run_id: "run_1", events_url: "/api/v1/runs/run_1/events" } }));
   await page.route("**/api/v1/runs/run_1/events", async (route) => {
     complete = true;
     await route.fulfill({
       contentType: "text/event-stream",
-      body: 'event: status\nid: 1\ndata: {"message":"正在检索"}\n\nevent: answer_delta\nid: 2\ndata: {"delta":"Q2 Revenue 为 20。 [1]"}\n\nevent: completed\nid: 3\ndata: {}\n\n'
+      body: 'event: status\nid: 1\ndata: {"message":"Searching evidence"}\n\nevent: answer_delta\nid: 2\ndata: {"delta":"Q2 revenue was 20. [1]"}\n\nevent: completed\nid: 3\ndata: {}\n\n'
     });
   });
   await page.route("**/api/v1/conversations/conv_1", (route) => route.fulfill({ json: { id: "conv_1", title: "Revenue", scope: { document_ids: ["doc_1"] }, messages: complete ? [
-    { id: "msg_user_1", role: "user", content: "Q2 Revenue 是多少？", status: "completed", citations: [] },
-    { id: "msg_1", role: "assistant", content: "Q2 Revenue 为 20。 [1]", status: "completed", citations: [] }
+    { id: "msg_user_1", role: "user", content: "What was Q2 revenue?", status: "completed", citations: [] },
+    { id: "msg_1", role: "assistant", content: "Q2 revenue was 20. [1]", status: "completed", citations: [] }
   ] : [] } }));
 
   await page.goto("/chat?document=doc_1");
-  await page.getByLabel("问题").fill("Q2 Revenue 是多少？");
-  await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByText("Q2 Revenue 为 20。 [1]")).toBeVisible();
-  await expect(page.getByRole("button", { name: "复制提问" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Revenue.*Q2 Revenue 是多少/ })).toBeVisible();
+  await page.getByLabel("Question").fill("What was Q2 revenue?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Q2 revenue was 20. [1]")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy question" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy answer" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Revenue.*What was Q2 revenue/ })).toBeVisible();
 });
 
 test("conversation history opens the complete question and answer", async ({ page }) => {
@@ -50,8 +50,8 @@ test("conversation history opens the complete question and answer", async ({ pag
   let historyVisible = true;
   await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [] } }));
   await page.route("**/api/v1/conversations?limit=30", (route) => route.fulfill({ json: { items: historyVisible ? [{
-    id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, message_count: 2,
-    last_question: "VONB 是什么含义？", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z"
+    id: "conv_history", title: "VONB meaning", scope: { document_ids: [] }, message_count: 2,
+    last_question: "What does VONB mean?", last_activity_at: "2026-08-09T12:00:00Z", created_at: "2026-08-09T12:00:00Z"
   }] : [] } }));
   await page.route("**/api/v1/conversations/conv_history", async (route) => {
     if (route.request().method() === "DELETE") {
@@ -60,24 +60,24 @@ test("conversation history opens the complete question and answer", async ({ pag
       return;
     }
     await route.fulfill({ json: {
-      id: "conv_history", title: "VONB 含义", scope: { document_ids: [] }, messages: [
-        { id: "history_user", role: "user", content: "VONB 是什么含义？", status: "completed", citations: [] },
-        { id: "history_answer", role: "assistant", content: "VONB 指新业务价值。", status: "completed", citations: [] }
+      id: "conv_history", title: "VONB meaning", scope: { document_ids: [] }, messages: [
+        { id: "history_user", role: "user", content: "What does VONB mean?", status: "completed", citations: [] },
+        { id: "history_answer", role: "assistant", content: "VONB means value of new business.", status: "completed", citations: [] }
       ]
     } });
   });
 
   await page.goto("/documents");
-  await page.getByRole("link", { name: /VONB 含义.*VONB 是什么含义/ }).click();
+  await page.getByRole("link", { name: /VONB meaning.*What does VONB mean/ }).click();
 
   await expect(page).toHaveURL(/\/chat\/conv_history$/);
-  await expect(page.getByRole("main").getByText("VONB 是什么含义？", { exact: true })).toBeVisible();
-  await expect(page.getByRole("main").getByText("VONB 指新业务价值。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText("What does VONB mean?", { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText("VONB means value of new business.", { exact: true })).toBeVisible();
 
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "删除会话：VONB 含义" }).click();
+  await page.getByRole("button", { name: "Delete conversation: VONB meaning" }).click();
   await expect(page).toHaveURL(/\/chat$/);
-  await expect(page.getByRole("link", { name: /VONB 含义/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /VONB meaning/ })).toHaveCount(0);
 });
 
 test("analytics page exposes quality metrics", async ({ page }) => {
@@ -87,7 +87,7 @@ test("analytics page exposes quality metrics", async ({ page }) => {
     reviews: { pending: 1 }, feedback: { total: 4, positive_rate: 0.75 }, recent_runs: []
   } }));
   await page.goto("/analytics");
-  await expect(page.getByRole("heading", { name: "运行分析" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Run Analytics" })).toBeVisible();
   await expect(page.getByText("90%" )).toBeVisible();
   await expect(page.getByText("842 ms")).toBeVisible();
 });
@@ -101,9 +101,9 @@ test("anonymous user signs in before accessing the application", async ({ page }
   });
   await page.route("**/api/v1/documents", (route) => route.fulfill({ json: { items: [] } }));
   await page.goto("/documents");
-  await expect(page.getByRole("heading", { name: "登录演示空间" })).toBeVisible();
-  await page.getByLabel("用户名").fill("interviewer");
-  await page.getByLabel("密码").fill("correct horse battery staple");
-  await page.getByRole("button", { name: "安全登录" }).click();
-  await expect(page.getByRole("heading", { name: "季度业务文档" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to the demo workspace" })).toBeVisible();
+  await page.getByLabel("Username").fill("interviewer");
+  await page.getByLabel("Password").fill("correct horse battery staple");
+  await page.getByRole("button", { name: "Secure sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Quarterly Business Documents" })).toBeVisible();
 });

@@ -27,15 +27,15 @@ describe("ChatPage", () => {
     });
     const emptyConversation = {
       id: "conv_1",
-      title: "潜在问题",
+      title: "Potential issues",
       scope: { document_ids: ["doc_1"] },
       messages: [],
     };
     const completedConversation = {
       ...emptyConversation,
       messages: [
-        { id: "msg_user", role: "user", content: "当前文档有哪些潜在问题？", status: "completed", citations: [] },
-        { id: "msg_answer", role: "assistant", content: "主要关注执行偏差。", status: "completed", citations: [] },
+        { id: "msg_user", role: "user", content: "What potential issues are in the current document?", status: "completed", citations: [] },
+        { id: "msg_answer", role: "assistant", content: "Focus on execution variance.", status: "completed", citations: [] },
       ],
     };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
@@ -49,8 +49,8 @@ describe("ChatPage", () => {
       throw new Error(`Unexpected API call: ${path}`);
     });
     streamSseMock.mockImplementation(async (_path: string, onEvent: (event: { event: string; data: Record<string, unknown> }) => void) => {
-      onEvent({ event: "status", data: { message: "正在检索证据" } });
-      onEvent({ event: "answer_delta", data: { delta: "主要关注执行偏差。" } });
+      onEvent({ event: "status", data: { message: "Searching evidence" } });
+      onEvent({ event: "answer_delta", data: { delta: "Focus on execution variance." } });
       completed = true;
     });
     const scrollToMock = vi.fn();
@@ -62,19 +62,19 @@ describe("ChatPage", () => {
       </MemoryRouter>,
     );
 
-    const input = await screen.findByRole("textbox", { name: "问题" });
+    const input = await screen.findByRole("textbox", { name: "Question" });
     await waitFor(() => expect(input).toBeEnabled());
-    fireEvent.change(input, { target: { value: "当前文档有哪些潜在问题？" } });
+    fireEvent.change(input, { target: { value: "What potential issues are in the current document?" } });
     fireEvent.submit(input.closest("form")!);
 
-    expect(screen.getByText("当前文档有哪些潜在问题？")).toBeInTheDocument();
-    expect(screen.getByText("正在提交问题…")).toBeInTheDocument();
-    expect(screen.queryByText("从可核验证据开始")).not.toBeInTheDocument();
+    expect(screen.getByText("What potential issues are in the current document?")).toBeInTheDocument();
+    expect(screen.getByText("Submitting question…")).toBeInTheDocument();
+    expect(screen.queryByText("Start with verifiable evidence")).not.toBeInTheDocument();
     await waitFor(() => expect(scrollToMock).toHaveBeenCalled());
 
     resolveMessagePost({ run_id: "run_1", events_url: "/events/run_1" });
-    await waitFor(() => expect(screen.getByText("主要关注执行偏差。")).toBeInTheDocument());
-    expect(screen.queryByText("从可核验证据开始")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Focus on execution variance.")).toBeInTheDocument());
+    expect(screen.queryByText("Start with verifiable evidence")).not.toBeInTheDocument();
     expect(scrollToMock.mock.calls.at(-1)?.[0]).toMatchObject({ top: expect.any(Number) });
   });
 });

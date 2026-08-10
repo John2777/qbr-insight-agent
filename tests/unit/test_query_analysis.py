@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from packages.qbr_core.answering import DeterministicAnswerEngine
+from packages.qbr_core.coverage import build_evidence_contract
 from packages.qbr_core.evidence import EvidencePackBuilder, infer_facet
 from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
 
@@ -46,6 +48,132 @@ def test_evidence_pack_reports_free_form_missing_requirements() -> None:
     pack = EvidencePackBuilder().build(plan, [_row("revenue", "Revenue increased to 120")])
     assert "revenue evidence" in pack.covered_facets
     assert "margin evidence" in pack.missing_facets
+
+
+def test_typed_coverage_does_not_treat_fallback_wording_as_a_missing_requirement() -> None:
+    plan = deterministic_plan("概括当前文档")
+
+    pack = EvidencePackBuilder().build(plan, [_row("summary", "Revenue increased and margin remained resilient.")])
+
+    assert pack.missing_facets == ("Use evidence that directly resolves the user's wording",)
+    assert pack.coverage.has_gaps is False
+    assert pack.coverage.supported_count == 1
+
+
+def test_multi_part_growth_question_has_stable_typed_facets_and_specific_gap() -> None:
+    question = "VONB、OPAT和新业务价值率分别同比增长多少？增长主要来自哪些业务板块？"
+    plan = deterministic_plan(question)
+    candidates = [
+        _row(
+            "financials",
+            "核心财务指标 | 2024A | 2025A | 同比/变化\n"
+            "VONB | 4,712 | 5,516 | +15% CER\n"
+            "OPAT | 6,605 | 7,136 | +12%/股",
+            chunk_type="table",
+        ),
+        _row(
+            "margin",
+            "VONB Margin | 24/12=53.4; 25/12=56.1; 26/03=56.0",
+            slide_no=2,
+            chunk_type="chart",
+        ),
+        _row(
+            "market",
+            "香港2025年VONB为2,256，增长28%；其他市场只有本期估算值。",
+            slide_no=3,
+        ),
+    ]
+
+    pack = EvidencePackBuilder().build(plan, candidates)
+    by_id = {item.facet.facet_id: item.status for item in pack.coverage.facets}
+
+    assert set(by_id) == {
+        "metric_comparison:vonb",
+        "metric_comparison:opat",
+        "metric_comparison:vonb_margin",
+        "driver_attribution:business_segment",
+    }
+    assert by_id["metric_comparison:vonb"] == "supported"
+    assert by_id["metric_comparison:opat"] == "supported"
+    assert by_id["metric_comparison:vonb_margin"] == "supported"
+    assert by_id["driver_attribution:business_segment"] == "partial"
+    assert pack.coverage.supported_count == 3
+    assert pack.coverage.gap_labels == ("增长主要来自哪些业务板块",)
+
+
+def test_typed_facets_are_stable_across_equivalent_planner_wording_and_question_paraphrase() -> None:
+    question = "VONB、OPAT和新业务价值率分别同比增长多少？增长主要来自哪些业务板块？"
+    first = build_evidence_contract(question)
+    second = build_evidence_contract("VONB、OPAT与新业务价值率同比变化多少？哪些业务板块贡献增长？")
+
+    assert {facet.facet_id for facet in first} == {facet.facet_id for facet in second}
+
+    evidence = [
+        _row("growth", "VONB | 2024=4,712 | 2025=5,516 | +15% CER", chunk_type="table"),
+        _row("driver", "增长主要来自香港市场，香港VONB同比增长28%。", slide_no=2),
+    ]
+    first_plan = replace(deterministic_plan(question), evidence_requirements=("metric growth and segment drivers",))
+    second_plan = replace(deterministic_plan(question), evidence_requirements=("同比数值", "业务板块增长来源"))
+    first_statuses = {item.facet.facet_id: item.status for item in EvidencePackBuilder().build(first_plan, evidence).coverage.facets}
+    second_statuses = {item.facet.facet_id: item.status for item in EvidencePackBuilder().build(second_plan, evidence).coverage.facets}
+    assert first_statuses == second_statuses
+
+
+def test_attribution_requires_direct_driver_evidence_not_just_current_segment_size() -> None:
+    question = "VONB同比增长多少？增长主要来自哪些业务板块？"
+    plan = deterministic_plan(question)
+    pack = EvidencePackBuilder().build(
+        plan,
+        [
+            _row("growth", "VONB | 2024=4,712 | 2025=5,516 | +15% CER", chunk_type="table"),
+            _row("size", "市场 | VONB\n香港 | 2,256\n中国内地 | 1,180", slide_no=2, chunk_type="table"),
+        ],
+    )
+
+    driver = next(item for item in pack.coverage.facets if item.facet.kind == "driver_attribution")
+    assert driver.status == "partial"
+
+    supported = EvidencePackBuilder().build(
+        plan,
+        [
+            _row("growth", "VONB | 2024=4,712 | 2025=5,516 | +15% CER", chunk_type="table"),
+            _row("driver", "增长主要来自香港市场，香港VONB同比增长28%。", slide_no=2),
+        ],
+    )
+    driver = next(item for item in supported.coverage.facets if item.facet.kind == "driver_attribution")
+    assert driver.status == "supported"
+
+
+def test_source_gap_message_is_user_friendly_in_chinese_and_english() -> None:
+    builder = EvidencePackBuilder()
+    chinese_plan = deterministic_plan("VONB同比增长多少？增长主要来自哪些业务板块？")
+    chinese_pack = builder.build(
+        chinese_plan,
+        [_row("growth_zh", "VONB | 2024=4,712 | 2025=5,516 | +15% CER", chunk_type="table")],
+    )
+    chinese_answer = DeterministicAnswerEngine._render_safe_fallback(
+        chinese_plan,
+        chinese_pack.evidence,
+        None,
+        chinese_pack,
+    )
+
+    english_plan = deterministic_plan("How much did VONB grow? Which business segments drove growth?")
+    english_pack = builder.build(
+        english_plan,
+        [_row("growth_en", "VONB | 2024=4,712 | 2025=5,516 | +15% CER", chunk_type="table")],
+    )
+    english_answer = DeterministicAnswerEngine._render_safe_fallback(
+        english_plan,
+        english_pack.evidence,
+        None,
+        english_pack,
+    )
+
+    assert "当前资料暂未支持以下内容" in chinese_answer
+    assert "证据覆盖" not in chinese_answer
+    assert "The current sources do not yet support" in english_answer
+    assert "Evidence coverage" not in english_answer
 
 
 def test_task_frame_can_request_provenance_without_special_source_intent() -> None:

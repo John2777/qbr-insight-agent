@@ -53,8 +53,8 @@ describe("parseAnswer", () => {
     />);
 
     expect(screen.getByText(/衡量新业务预计创造的未来价值/)).toBeInTheDocument();
-    expect(screen.queryByText("数据表")).not.toBeInTheDocument();
-    expect(screen.queryByText("趋势图")).not.toBeInTheDocument();
+    expect(screen.queryByText("Data table")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trend chart")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -99,7 +99,7 @@ describe("parseAnswer", () => {
     />);
 
     await waitFor(() => expect(screen.getByText("Execution quality")).toBeInTheDocument());
-    expect(screen.getByText("趋势图")).toBeInTheDocument();
+    expect(screen.getByText("Trend chart")).toBeInTheDocument();
     expect(screen.getByTestId("line-chart")).toHaveTextContent("Persistency");
     expect(screen.getByTestId("line-chart")).not.toHaveTextContent("Revenue");
   });

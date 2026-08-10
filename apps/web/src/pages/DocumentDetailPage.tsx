@@ -45,7 +45,7 @@ export function DocumentDetailPage() {
   async function purge() {
     if (!document || deleting) return;
     const confirmed = window.confirm(
-      `彻底删除「${document.title}」？\n\n这会删除原始 PPT、解析结果、检索索引，以及所有引用或以该 PPT 为范围的问答记录。此操作不可恢复。`
+      `Permanently delete “${document.title}”?\n\nThis removes the original PPT, parsed results, search index, and every Q&A that references or is scoped to this PPT. This action cannot be undone.`
     );
     if (!confirmed) return;
     setDeleting(true);
@@ -53,32 +53,32 @@ export function DocumentDetailPage() {
     try {
       const result = await api<{ status: "completed" | "partial" }>(`/api/v1/documents/${document.id}/purge`, { method: "DELETE" });
       if (result.status !== "completed") {
-        throw new Error("数据库已清理，但文件或向量索引尚未完全清理；请再次点击重试。");
+        throw new Error("Database records were deleted, but some files or vector indexes remain. Try again to finish cleanup.");
       }
       navigate("/documents", { replace: true });
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "删除失败，请重试");
+      setDeleteError(error instanceof Error ? error.message : "Delete failed. Try again.");
     } finally {
       setDeleting(false);
     }
   }
 
-  if (!document) return <div className="loading">正在加载文档…</div>;
-  const header = <header className="detail-header"><div><Link to="/documents" className="back">← 文档库</Link><h1>{document.title}</h1></div><div className="detail-actions">{document.versions[0]?.active_parser_run_id && <Link className="primary-button" to={`/chat?document=${document.id}`}>基于此文档提问</Link>}<button className="danger-button" disabled={deleting} onClick={() => void purge()}>{deleting ? "正在彻底删除…" : "彻底删除"}</button></div></header>;
-  if (!document.versions[0]?.active_parser_run_id) return <section className="detail-page">{header}{deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}<div className="processing-card"><div className="spinner"/><h2>{statusLabel(document.status)}</h2><p>解析完成后，本页会显示幻灯片和结构化图表。</p></div></section>;
+  if (!document) return <div className="loading">Loading document…</div>;
+  const header = <header className="detail-header"><div><Link to="/documents" className="back">← Document Library</Link><h1>{document.title}</h1></div><div className="detail-actions">{document.versions[0]?.active_parser_run_id && <Link className="primary-button" to={`/chat?document=${document.id}`}>Ask about this document</Link>}<button className="danger-button" disabled={deleting} onClick={() => void purge()}>{deleting ? "Permanently deleting…" : "Permanently delete"}</button></div></header>;
+  if (!document.versions[0]?.active_parser_run_id) return <section className="detail-page">{header}{deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}<div className="processing-card"><div className="spinner"/><h2>{statusLabel(document.status)}</h2><p>Slides and structured charts will appear here when parsing is complete.</p></div></section>;
 
   return (
     <section className="detail-page">
       {header}
       {deleteError && <div className="alert error detail-delete-error" role="alert">{deleteError}</div>}
       <div className="detail-grid">
-        <aside className="slide-nav" aria-label="幻灯片列表">{slides.map((slide) => <button key={slide.id} onClick={() => choose(slide)} className={current?.id === slide.id ? "active" : ""}><span>{slide.slide_no}</span><img src={slide.thumbnail_url ?? slide.preview_url} alt={`第 ${slide.slide_no} 页缩略图`} loading="lazy" decoding="async" width="320" height="180"/><small>{slide.title || "无标题"}</small></button>)}</aside>
-        <div className="preview-pane">{current && <><div className="preview-toolbar"><strong>第 {current.slide_no} 页</strong><span>质量 {Math.round(current.quality_score * 100)}%</span></div><SlideCanvas slide={current}/></>}</div>
+        <aside className="slide-nav" aria-label="Slide list">{slides.map((slide) => <button key={slide.id} onClick={() => choose(slide)} className={current?.id === slide.id ? "active" : ""}><span>{slide.slide_no}</span><img src={slide.thumbnail_url ?? slide.preview_url} alt={`Slide ${slide.slide_no} thumbnail`} loading="lazy" decoding="async" width="320" height="180"/><small>{slide.title || "Untitled"}</small></button>)}</aside>
+        <div className="preview-pane">{current && <><div className="preview-toolbar"><strong>Slide {current.slide_no}</strong><span>Quality {Math.round(current.quality_score * 100)}%</span></div><SlideCanvas slide={current}/></>}</div>
         <aside className="structured-pane">
-          <div className="tabs"><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>内容</button><button className={tab === "charts" ? "active" : ""} onClick={() => setTab("charts")}>图表</button><button className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}>备注</button></div>
-          {tab === "content" && current?.elements.filter((e) => e.element_type !== "notes").map((element) => <article className="element-card" key={element.id}><div><span>{element.element_type}</span><ConfidenceBadge confidence={element.confidence}/></div><p>{element.text_content || "结构化元素"}</p></article>)}
-          {tab === "charts" && current?.charts.map((chart) => <article className="chart-card" key={chart.id}><h3>{chart.title || "未命名图表"}</h3><ConfidenceBadge confidence={chart.confidence} source={chart.source_kind}/>{chart.series.map((series) => <div key={series.id} className="series-table"><strong>{series.name}</strong><table><tbody>{series.points.map((point) => <tr key={point.id}><td>{point.category}</td><td>{point.display_value ?? point.y_value ?? "—"}</td></tr>)}</tbody></table></div>)}</article>)}
-          {tab === "notes" && <div className="notes">{current?.notes_text || "此页没有演讲者备注。"}</div>}
+          <div className="tabs"><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content</button><button className={tab === "charts" ? "active" : ""} onClick={() => setTab("charts")}>Charts</button><button className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}>Notes</button></div>
+          {tab === "content" && current?.elements.filter((e) => e.element_type !== "notes").map((element) => <article className="element-card" key={element.id}><div><span>{element.element_type}</span><ConfidenceBadge confidence={element.confidence}/></div><p>{element.text_content || "Structured element"}</p></article>)}
+          {tab === "charts" && current?.charts.map((chart) => <article className="chart-card" key={chart.id}><h3>{chart.title || "Untitled chart"}</h3><ConfidenceBadge confidence={chart.confidence} source={chart.source_kind}/>{chart.series.map((series) => <div key={series.id} className="series-table"><strong>{series.name}</strong><table><tbody>{series.points.map((point) => <tr key={point.id}><td>{point.category}</td><td>{point.display_value ?? point.y_value ?? "—"}</td></tr>)}</tbody></table></div>)}</article>)}
+          {tab === "notes" && <div className="notes">{current?.notes_text || "This slide has no speaker notes."}</div>}
         </aside>
       </div>
     </section>

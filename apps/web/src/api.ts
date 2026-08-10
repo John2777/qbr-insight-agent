@@ -59,11 +59,16 @@ export async function uploadPresentation(file: File): Promise<{ document: { id: 
 
 export function statusLabel(status: string): string {
   return ({
-    processing: "处理中",
-    pending: "等待处理",
-    running: "处理中",
-    ready: "可查询",
-    partial: "部分可用",
-    failed: "失败"
+    processing: "Processing",
+    pending: "Pending",
+    running: "Processing",
+    ready: "Ready",
+    partial: "Partially available",
+    failed: "Failed",
+    completed: "Completed",
+    cancelled: "Canceled",
+    in_review: "In review",
+    resolved: "Resolved",
+    dismissed: "Dismissed"
   } as Record<string, string>)[status] ?? status;
 }

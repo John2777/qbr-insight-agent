@@ -15,6 +15,20 @@ from .service_support import _loads
 logger = logging.getLogger(__name__)
 
 
+def _analytics_run(row: Any) -> dict[str, Any]:
+    item = dict(row)
+    warnings = _loads(item.pop("warning_json", "[]"), [])
+    metadata = _loads(item.pop("metadata_json", "{}"), {})
+    evidence_pack = metadata.get("evidence_pack") if isinstance(metadata, dict) else None
+    coverage = evidence_pack.get("coverage") if isinstance(evidence_pack, dict) else None
+    query_plan = metadata.get("query_plan") if isinstance(metadata, dict) else None
+    answer_language = query_plan.get("answer_language", "en") if isinstance(query_plan, dict) else "en"
+    item["warnings"] = warnings
+    item["warning_details"] = warning_details(warnings, language=str(answer_language))
+    item["evidence_coverage"] = coverage if isinstance(coverage, dict) else None
+    return item
+
+
 class ResourceService(ServiceComponent):
     def list_documents(self, workspace_id: str) -> list[dict[str, Any]]:
         with self.db.read() as conn:
@@ -401,8 +415,16 @@ class ResourceService(ServiceComponent):
                 (workspace_id,),
             ).fetchone()
             recent = conn.execute(
-                """SELECT r.id,r.status,r.created_at,r.completed_at,r.warning_json,c.title
+                """SELECT r.id,r.status,r.created_at,r.completed_at,r.warning_json,
+                          c.title,q.content question,a.metadata_json
                    FROM runs r JOIN conversations c ON c.id=r.conversation_id
+                   JOIN messages a ON a.id=r.assistant_message_id
+                   LEFT JOIN messages q ON q.rowid=(
+                     SELECT previous.rowid FROM messages previous
+                     WHERE previous.conversation_id=r.conversation_id
+                       AND previous.role='user' AND previous.rowid<a.rowid
+                     ORDER BY previous.rowid DESC LIMIT 1
+                   )
                    WHERE r.workspace_id=? ORDER BY r.created_at DESC LIMIT 10""",
                 (workspace_id,),
             ).fetchall()
@@ -422,12 +444,5 @@ class ResourceService(ServiceComponent):
                 "total": feedback_total,
                 "positive_rate": round(int(feedback_row["positive"] or 0) / feedback_total, 3) if feedback_total else None,
             },
-            "recent_runs": [
-                {
-                    **{key: value for key, value in dict(row).items() if key != "warning_json"},
-                    "warnings": (warnings := _loads(row["warning_json"], [])),
-                    "warning_details": warning_details(warnings),
-                }
-                for row in recent
-            ],
+            "recent_runs": [_analytics_run(row) for row in recent],
         }

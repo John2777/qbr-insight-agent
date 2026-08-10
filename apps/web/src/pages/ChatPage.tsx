@@ -33,7 +33,7 @@ export function ChatPage() {
         setConversation(item);
         setSelected(item.scope.document_ids ?? []);
       })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "历史问答加载失败"); });
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "Failed to load conversation"); });
     return () => { active = false; };
   }, [conversationId]);
 
@@ -63,20 +63,20 @@ export function ChatPage() {
     if (!submittedQuestion || sending) return;
     stickToBottomRef.current = true;
     pendingBaselineCountRef.current = conversation?.messages.length ?? 0;
-    setSending(true); setError(""); setStreamingAnswer(""); setStage("正在提交问题…");
+    setSending(true); setError(""); setStreamingAnswer(""); setStage("Submitting question…");
     setPendingQuestion(submittedQuestion); setQuestion("");
     try {
       let id = conversationId;
       if (!id) { const created = await api<Conversation>("/api/v1/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document_ids: selected, title: submittedQuestion.slice(0, 60) }) }); id = created.id; navigate(`/chat/${id}`, { replace: true }); }
       const sent = await api<{ run_id: string; events_url: string }>(`/api/v1/conversations/${id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: submittedQuestion, client_message_id: crypto.randomUUID() }) });
-      setStage("已进入回答队列");
+      setStage("Queued for an answer");
       await streamSse(sent.events_url, (event) => {
-        if (event.event === "status") setStage(String(event.data.message ?? "处理中"));
+        if (event.event === "status") setStage(String(event.data.message ?? "Processing"));
         if (event.event === "answer_delta") setStreamingAnswer((value) => value + String(event.data.delta ?? ""));
-        if (event.event === "warning") setStage(String(event.data.message ?? event.data.code ?? "已降级处理"));
+        if (event.event === "warning") setStage(String(event.data.message ?? event.data.code ?? "Fallback mode active"));
       });
       setConversation(await api<Conversation>(`/api/v1/conversations/${id}`)); setPendingQuestion(""); setStreamingAnswer(""); setStage(""); notifyConversationsChanged();
-    } catch (err) { setPendingQuestion(""); setStage(""); setQuestion(submittedQuestion); setError(err instanceof Error ? err.message : "回答失败"); }
+    } catch (err) { setPendingQuestion(""); setStage(""); setQuestion(submittedQuestion); setError(err instanceof Error ? err.message : "Failed to answer"); }
     finally { setSending(false); }
   }
   async function showEvidence(item: Citation) { setCitation(item); setSlide(await api<SlideDetail>(`/api/v1/slides/${item.slide_id}`)); }
@@ -90,12 +90,12 @@ export function ChatPage() {
   const showEmpty = visibleMessages.length === 0 && !showPendingQuestion && !sending && !stage && !streamingAnswer;
   return (
     <section className="chat-page">
-      <div className="chat-column"><header className="chat-header"><div><span className="eyebrow">EVIDENCE QA</span><h1>{conversation?.title || "向 QBR 提问"}</h1></div><select aria-label="文档范围" value={selected[0] ?? ""} disabled={!!conversationId} onChange={(e) => setSelected(e.target.value ? [e.target.value] : [])}><option value="">全部可用文档</option>{documents.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}</select></header>
-        <div className="messages" ref={messagesRef} onScroll={handleMessageScroll}>{showEmpty && <div className="chat-empty"><span>⌁</span><h2>从可核验证据开始</h2><p>试试“VONB 是什么意思？”或“Margin 从 Q1 到 Q3 变化多少？”</p></div>}{visibleMessages.map((message) => <article key={message.id} className={`message ${message.role}`}><div className="message-role">{message.role === "user" ? "你" : "QBR Agent"}</div><div className="message-body">{message.role === "assistant" && message.content ? <AssistantAnswer content={message.content} citations={message.citations ?? []} showVisuals={message.metadata?.show_visuals ?? true} onCitation={(item) => void showEvidence(item)}/> : message.content || (message.status === "running" ? "正在准备回答…" : "")}{message.citations?.length > 0 && <div className="citation-row">{message.citations.map((item) => <button onClick={() => void showEvidence(item)} key={item.id}>{item.label} 第 {item.slide_no} 页</button>)}</div>}</div>{message.content?.trim() && <div className="message-actions"><MessageCopyButton content={message.content} kind={message.role === "user" ? "提问" : "回答"}/></div>}</article>)}{showPendingQuestion && <article className="message user pending"><div className="message-role">你</div><div className="message-body">{pendingQuestion}</div></article>}{(streamingAnswer || stage || sending) && <article className="message assistant streaming" aria-live="polite"><div className="message-role">QBR Agent · LIVE</div><div className="message-body">{streamingAnswer || stage || "正在准备回答…"}<span className="stream-cursor">▍</span></div></article>}</div>
+      <div className="chat-column"><header className="chat-header"><div><span className="eyebrow">EVIDENCE QA</span><h1>{conversation?.title || "Ask QBR"}</h1></div><select aria-label="Document scope" value={selected[0] ?? ""} disabled={!!conversationId} onChange={(e) => setSelected(e.target.value ? [e.target.value] : [])}><option value="">All available documents</option>{documents.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}</select></header>
+        <div className="messages" ref={messagesRef} onScroll={handleMessageScroll}>{showEmpty && <div className="chat-empty"><span>⌁</span><h2>Start with verifiable evidence</h2><p>Try “What does VONB mean?” or “How did margin change from Q1 to Q3?”</p></div>}{visibleMessages.map((message) => <article key={message.id} className={`message ${message.role}`}><div className="message-role">{message.role === "user" ? "You" : "QBR Agent"}</div><div className="message-body">{message.role === "assistant" && message.content ? <AssistantAnswer content={message.content} citations={message.citations ?? []} showVisuals={message.metadata?.show_visuals ?? true} onCitation={(item) => void showEvidence(item)}/> : message.content || (message.status === "running" ? "Preparing answer…" : "")}{message.citations?.length > 0 && <div className="citation-row">{message.citations.map((item) => <button onClick={() => void showEvidence(item)} key={item.id}>{item.label} · Slide {item.slide_no}</button>)}</div>}</div>{message.content?.trim() && <div className="message-actions"><MessageCopyButton content={message.content} kind={message.role === "user" ? "question" : "answer"}/></div>}</article>)}{showPendingQuestion && <article className="message user pending"><div className="message-role">You</div><div className="message-body">{pendingQuestion}</div></article>}{(streamingAnswer || stage || sending) && <article className="message assistant streaming" aria-live="polite"><div className="message-role">QBR Agent · LIVE</div><div className="message-body">{streamingAnswer || stage || "Preparing answer…"}<span className="stream-cursor">▍</span></div></article>}</div>
         {error && <div className="alert error" role="alert">{error}</div>}
-        <form className="composer" onSubmit={submit}><textarea aria-label="问题" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={documents.length ? "询问指标、趋势、差距或原因…" : "请先上传并解析一份文档"} disabled={!documents.length || sending} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}/><button disabled={!question.trim() || sending}>{sending ? "检索中…" : "发送"}</button><small>回答只使用当前文档证据；关键数值由结构化工具计算。</small></form>
+        <form className="composer" onSubmit={submit}><textarea aria-label="Question" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={documents.length ? "Ask about a metric, trend, gap, or driver…" : "Upload and parse a document first"} disabled={!documents.length || sending} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}/><button disabled={!question.trim() || sending}>{sending ? "Searching…" : "Send"}</button><small>Answers use only evidence from the selected documents; structured tools calculate key figures.</small></form>
       </div>
-      <aside className="evidence-pane">{citation && slide ? <><header><div><span className="eyebrow">SOURCE</span><h2>{citation.document_title}</h2><p>第 {citation.slide_no} 页 · {citation.element_type}</p></div><button aria-label="关闭证据" onClick={() => setCitation(null)}>×</button></header><SlideCanvas slide={slide} citation={citation}/><blockquote>{citation.quote}</blockquote><ConfidenceBadge confidence={citation.confidence} source={citation.source_kind}/></> : <div className="evidence-empty"><span>▱</span><h2>证据查看器</h2><p>点击回答中的引用，即可在原幻灯片中定位并高亮来源。</p></div>}</aside>
+      <aside className="evidence-pane">{citation && slide ? <><header><div><span className="eyebrow">SOURCE</span><h2>{citation.document_title}</h2><p>Slide {citation.slide_no} · {citation.element_type}</p></div><button aria-label="Close evidence" onClick={() => setCitation(null)}>×</button></header><SlideCanvas slide={slide} citation={citation}/><blockquote>{citation.quote}</blockquote><ConfidenceBadge confidence={citation.confidence} source={citation.source_kind}/></> : <div className="evidence-empty"><span>▱</span><h2>Evidence Viewer</h2><p>Select a citation in an answer to locate and highlight its source on the original slide.</p></div>}</aside>
     </section>
   );
 }

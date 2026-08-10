@@ -8,6 +8,6 @@ describe("document upload validation", () => {
   });
 
   it("rejects a PPTX above the 10 MiB limit", () => {
-    expect(validatePresentationFile({ name: "qbr.pptx", size: MAX_UPLOAD_BYTES + 1 })).toBe("文件不能超过 10 MiB");
+    expect(validatePresentationFile({ name: "qbr.pptx", size: MAX_UPLOAD_BYTES + 1 })).toBe("File must not exceed 10 MiB");
   });
 });

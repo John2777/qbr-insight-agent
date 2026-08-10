@@ -26,7 +26,7 @@ async function writeToClipboard(text: string): Promise<void> {
 
 export function MessageCopyButton({ content, kind }: {
   content: string;
-  kind: "提问" | "回答";
+  kind: "question" | "answer";
 }) {
   const [state, setState] = useState<CopyState>("idle");
   const resetTimer = useRef<number | undefined>(undefined);
@@ -44,12 +44,13 @@ export function MessageCopyButton({ content, kind }: {
     resetTimer.current = window.setTimeout(() => setState("idle"), 2000);
   }
 
-  const label = state === "copied" ? "已复制" : state === "error" ? "复制失败" : "复制";
+  const label = state === "copied" ? "Copied" : state === "error" ? "Copy failed" : "Copy";
+  const kindLabel = kind === "question" ? "question" : "answer";
   return <button
     type="button"
     className="message-copy-button"
     data-state={state}
-    aria-label={state === "idle" ? `复制${kind}` : `${kind}${label}`}
+    aria-label={state === "idle" ? `Copy ${kindLabel}` : state === "copied" ? `${kindLabel[0].toUpperCase()}${kindLabel.slice(1)} copied` : `${kindLabel[0].toUpperCase()}${kindLabel.slice(1)} copy failed`}
     onClick={() => void copy()}
   >
     <svg aria-hidden="true" viewBox="0 0 20 20">
