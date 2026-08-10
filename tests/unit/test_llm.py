@@ -10,16 +10,25 @@ from packages.qbr_core.llm import EvidenceQAAgent
 
 
 class FakeModel:
-    def __init__(self, content: str | Exception) -> None:
+    def __init__(self, content: str | Exception, *, finish_reason: str | None = None, output_tokens: int = 20) -> None:
         self.content = content
+        self.finish_reason = finish_reason
+        self.output_tokens = output_tokens
 
     def invoke(self, _messages: object) -> AIMessage:
         if isinstance(self.content, Exception):
             raise self.content
+        response_metadata = {"model_name": "deepseek-v4-flash"}
+        if self.finish_reason is not None:
+            response_metadata["finish_reason"] = self.finish_reason
         return AIMessage(
             content=self.content,
-            usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-            response_metadata={"model_name": "deepseek-v4-flash"},
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": self.output_tokens,
+                "total_tokens": 100 + self.output_tokens,
+            },
+            response_metadata=response_metadata,
         )
 
 
@@ -85,6 +94,37 @@ def test_llm_provider_failure_is_explicit_and_uses_safe_fallback(tmp_path: Path,
     assert "provider unavailable" not in str(result.model)
     assert '"event":"provider_call_failed"' in caplog.text
     assert '"run_id":"run_provider_failure"' in caplog.text
+
+
+def test_llm_length_finish_uses_complete_deterministic_fallback(tmp_path: Path) -> None:
+    fallback = "潜在问题包括：Digital STP 从26/02的73.8降至26/03的72.1，下降1.7个百分点。[1]"
+    truncated = "潜在问题包括：Digital STP 从26/02的73.8"
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(truncated, finish_reason="length", output_tokens=1200))
+
+    result = agent.answer(
+        question="当前文档里能找到哪些公司潜在的问题？",
+        deterministic_answer=fallback,
+        evidence=evidence(),
+        history=[],
+        answer_mode="negative_signal_summary",
+        query_plan={"intent": "negative_signal_summary"},
+    )
+
+    assert result.answer == fallback
+    assert result.warnings == ["LLM_OUTPUT_TRUNCATED"]
+    assert result.model["status"] == "truncated"
+    assert result.model["finish_reason"] == "length"
+
+
+def test_llm_token_limit_without_finish_reason_uses_fallback(tmp_path: Path) -> None:
+    fallback = "Revenue 在 Q2 的值为 20。[1]"
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel("Q2 Revenue 为 20", output_tokens=1200))
+
+    result = agent.answer(question="Q2 Revenue 是多少？", deterministic_answer=fallback, evidence=evidence(), history=[])
+
+    assert result.answer == fallback
+    assert result.warnings == ["LLM_OUTPUT_TRUNCATED"]
+    assert result.model["status"] == "truncated"
 
 
 def test_llm_rejects_positive_document_summary_for_negative_intent(tmp_path: Path) -> None:

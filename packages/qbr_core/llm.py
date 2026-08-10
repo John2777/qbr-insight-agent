@@ -15,6 +15,8 @@ from .verification import ClaimEvidenceVerifier
 
 logger = logging.getLogger(__name__)
 
+TRUNCATED_FINISH_REASONS = {"length", "max_tokens", "max_completion_tokens", "max_output_tokens"}
+
 SYSTEM_PROMPT = """你是 QBR Insight Agent，一个受控的企业文档证据问答助手。
 
 必须遵守：
@@ -141,9 +143,9 @@ class EvidenceQAAgent:
             f"证据原文：{item.get('quote', '')}"
             for index, item in enumerate(state["evidence"], 1)
         )
-        history_text = "\n".join(
-            f"{item.get('role', 'user')}: {item.get('content', '')[:1000]}" for item in state.get("history", [])
-        ) or "（无）"
+        history_text = (
+            "\n".join(f"{item.get('role', 'user')}: {item.get('content', '')[:1000]}" for item in state.get("history", [])) or "（无）"
+        )
         user_prompt = (
             f"用户问题：\n{state['question']}\n\n"
             f"主回答类型：{state.get('answer_mode', 'evidence_answer')}\n\n"
@@ -182,15 +184,21 @@ class EvidenceQAAgent:
             }
         usage = getattr(message, "usage_metadata", None) or {}
         response_metadata = getattr(message, "response_metadata", None) or {}
+        finish_reason = str(response_metadata.get("finish_reason") or "").casefold()
+        output_tokens = usage.get("output_tokens")
+        token_limit_reached = not finish_reason and isinstance(output_tokens, int) and output_tokens >= self.settings.llm_max_tokens
+        truncated = finish_reason in TRUNCATED_FINISH_REASONS or token_limit_reached
         return {
             "candidate_answer": _message_text(message),
+            "warnings": ["LLM_OUTPUT_TRUNCATED"] if truncated else [],
             "model": {
                 "provider": self.settings.llm_provider,
                 "model": response_metadata.get("model_name") or self.model_name,
-                "status": "completed",
+                "status": "truncated" if truncated else "completed",
+                "finish_reason": finish_reason or None,
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "input_tokens": usage.get("input_tokens"),
-                "output_tokens": usage.get("output_tokens"),
+                "output_tokens": output_tokens,
                 "total_tokens": usage.get("total_tokens"),
             },
         }
@@ -199,6 +207,8 @@ class EvidenceQAAgent:
         candidate = state.get("candidate_answer", "").strip()
         fallback = state["deterministic_answer"]
         warnings = list(state.get("warnings", []))
+        if "LLM_OUTPUT_TRUNCATED" in warnings:
+            return {"answer": fallback, "warnings": list(dict.fromkeys(warnings))}
         if not candidate or len(candidate) > 5000:
             if "LLM_PROVIDER_ERROR" not in warnings:
                 warnings.append("LLM_EMPTY_OR_OVERSIZED_RESPONSE")

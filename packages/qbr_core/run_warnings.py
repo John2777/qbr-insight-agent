@@ -82,6 +82,13 @@ _WARNING_CATALOG: dict[str, WarningDescriptor] = {
         label="模型回答已回退",
         description="模型返回为空或超出安全长度，系统已改用确定性证据答案。",
     ),
+    "LLM_OUTPUT_TRUNCATED": WarningDescriptor(
+        code="LLM_OUTPUT_TRUNCATED",
+        severity="degraded",
+        category="answer_fallback",
+        label="模型回答被截断",
+        description="模型达到输出长度上限，系统已改用完整的确定性证据答案。",
+    ),
     "LLM_CITATION_VALIDATION_FAILED": WarningDescriptor(
         code="LLM_CITATION_VALIDATION_FAILED",
         severity="degraded",

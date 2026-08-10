@@ -9,11 +9,14 @@ from packages.qbr_core.run_warnings import describe_warning, has_degraded_warnin
 def test_warning_catalog_separates_data_caveats_from_provider_fallbacks() -> None:
     synthetic = describe_warning("SYNTHETIC_DATA_SIGNAL")
     planner = describe_warning("QUERY_PLANNER_PROVIDER_ERROR")
+    truncated = describe_warning("LLM_OUTPUT_TRUNCATED")
 
     assert synthetic.severity == "info"
     assert synthetic.category == "data_caveat"
     assert planner.severity == "degraded"
     assert planner.category == "provider_fallback"
+    assert truncated.severity == "degraded"
+    assert truncated.category == "answer_fallback"
     assert has_degraded_warning([synthetic.code, planner.code])
 
 

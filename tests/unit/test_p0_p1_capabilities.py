@@ -11,6 +11,7 @@ from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.auth import create_hs256_token, create_password_hash, verify_password
 from packages.qbr_core.db import utc_now
 from packages.qbr_core.ids import new_id
+from packages.qbr_core.qa_service import _answer_deltas
 from packages.qbr_core.retrieval import fts_query
 
 
@@ -47,6 +48,19 @@ def test_question_is_queued_then_completed_by_worker(tmp_path: Path, synthetic_p
     assert completed["status"] == "completed"
     assert "20" in completed["message"]["content"]
     assert service.run_events(sent["run_id"], "ws_demo")[-1]["event"] == "completed"
+
+
+def test_answer_deltas_preserve_long_chinese_text() -> None:
+    answer = (
+        "文档中没有发现突破阈值的红灯事项，但存在以下基于数据和管理动作的关注点：\n\n"
+        "Digital STP从26/02的73.8降至26/03的72.1，下降1.7个百分点（文档标注为模拟数据）。\n"
+        "Persistency 13M从26/02的90.1降至26/03的89.4，下降0.7个百分点。"
+    )
+
+    deltas = _answer_deltas(answer)
+
+    assert all(0 < len(piece) <= 48 for piece in deltas)
+    assert "".join(deltas) == answer
 
 
 def test_fts_query_is_safe_and_searchable(tmp_path: Path, synthetic_pptx: Path) -> None:
@@ -108,9 +122,7 @@ def test_jwt_mode_is_fail_closed_and_rbac_is_enforced(tmp_path: Path) -> None:
     )
     app = create_app(settings)
     with app.state.service.db.transaction(immediate=True) as conn:
-        conn.execute(
-            "UPDATE workspace_members SET role='viewer' WHERE workspace_id='ws_demo' AND user_id='user_demo'"
-        )
+        conn.execute("UPDATE workspace_members SET role='viewer' WHERE workspace_id='ws_demo' AND user_id='user_demo'")
     token = create_hs256_token(
         settings,
         user_id="user_demo",

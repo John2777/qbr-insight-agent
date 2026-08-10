@@ -22,6 +22,13 @@ from .skill_registry import SkillDescriptor, SkillRegistry
 logger = logging.getLogger(__name__)
 
 
+def _answer_deltas(answer: str, chunk_size: int = 48) -> tuple[str, ...]:
+    """Split an answer without dropping long runs of non-whitespace text."""
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+    return tuple(answer[offset : offset + chunk_size] for offset in range(0, len(answer), chunk_size)) or ("",)
+
+
 def _loads(value: str | None, default: Any) -> Any:
     if not value:
         return default
@@ -181,10 +188,13 @@ class QAApplicationService:
                 if not ids:
                     return 0
                 placeholders = ",".join("?" for _ in ids)
-                return max(conn.execute(
-                    f"DELETE FROM {table} WHERE {column} IN ({placeholders})",
-                    ids,
-                ).rowcount, 0)
+                return max(
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE {column} IN ({placeholders})",
+                        ids,
+                    ).rowcount,
+                    0,
+                )
 
             deleted = {
                 "feedback": delete_related("feedback", "message_id", message_ids),
@@ -384,8 +394,10 @@ class QAApplicationService:
                 "answer_mode": answer_mode,
                 "show_visuals": not single_term_definition,
                 "knowledge_source": (
-                    "curated_glossary+document" if "term_definition" in plan.active_intents and evidence
-                    else "curated_glossary" if single_term_definition
+                    "curated_glossary+document"
+                    if "term_definition" in plan.active_intents and evidence
+                    else "curated_glossary"
+                    if single_term_definition
                     else "document_evidence"
                 ),
                 "pipeline_version": "planned-evidence-v2",
@@ -456,14 +468,21 @@ class QAApplicationService:
                 conn.execute(
                     "INSERT INTO citations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (
-                        citation_id, run["assistant_message_id"], index, evidence_item["document_version_id"],
-                        evidence_item["slide_id"], evidence_item.get("element_id"), evidence_item.get("chunk_id"),
-                        evidence_item["quote"], self.db.json(evidence_item.get("bbox", {})),
-                        evidence_item["confidence"], evidence_item["source_kind"],
+                        citation_id,
+                        run["assistant_message_id"],
+                        index,
+                        evidence_item["document_version_id"],
+                        evidence_item["slide_id"],
+                        evidence_item.get("element_id"),
+                        evidence_item.get("chunk_id"),
+                        evidence_item["quote"],
+                        self.db.json(evidence_item.get("bbox", {})),
+                        evidence_item["confidence"],
+                        evidence_item["source_kind"],
                     ),
                 )
                 self._run_event(conn, run_id, "citation", {"id": citation_id, "label": f"[{index}]"})
-            for piece in re.findall(r".{1,48}(?:\s+|$)", answer, flags=re.S) or [answer]:
+            for piece in _answer_deltas(answer):
                 self._run_event(conn, run_id, "answer_delta", {"delta": piece})
             for warning in warnings:
                 self._run_event(conn, run_id, "warning", {"message": warning})
