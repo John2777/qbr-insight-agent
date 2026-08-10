@@ -425,7 +425,8 @@ class ResourceService(ServiceComponent):
                        AND previous.role='user' AND previous.rowid<a.rowid
                      ORDER BY previous.rowid DESC LIMIT 1
                    )
-                   WHERE r.workspace_id=? ORDER BY r.created_at DESC LIMIT 10""",
+                   WHERE r.workspace_id=?
+                   ORDER BY r.created_at DESC,a.rowid DESC LIMIT 10""",
                 (workspace_id,),
             ).fetchall()
         feedback_total = int(feedback_row["total"] or 0)

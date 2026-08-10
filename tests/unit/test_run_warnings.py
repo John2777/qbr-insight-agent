@@ -75,8 +75,13 @@ def test_analytics_exposes_warning_details_and_degraded_run_count(tmp_path: Path
 def test_analytics_shows_each_run_question_instead_of_repeating_the_conversation_title(tmp_path: Path) -> None:
     service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects", run_inline_worker=False))
     conversation = service.create_conversation("ws_demo", "user_demo", title="Quarterly performance")
-    service.ask(conversation["id"], "VONB 同比增长多少？", "ws_demo", "user_demo")
-    service.ask(conversation["id"], "增长主要来自哪些业务板块？", "ws_demo", "user_demo")
+    first = service.ask(conversation["id"], "VONB 同比增长多少？", "ws_demo", "user_demo")
+    second = service.ask(conversation["id"], "增长主要来自哪些业务板块？", "ws_demo", "user_demo")
+    with service.db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE runs SET created_at='2026-08-10T12:00:00.000Z' WHERE id IN (?,?)",
+            (first["run_id"], second["run_id"]),
+        )
 
     recent_runs = service.analytics_summary("ws_demo")["recent_runs"]
 
