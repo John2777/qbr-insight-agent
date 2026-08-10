@@ -249,7 +249,7 @@ def _extract_table(content: str, terms: set[str], plan: QueryPlan) -> str:
         return content.strip()
     header = rows[0]
     body = rows[1:]
-    if plan.intent in {"negative_signal_summary", "risk_explanation"}:
+    if any(intent in {"negative_signal_summary", "risk_explanation"} for intent in plan.active_intents):
         ranked = sorted(enumerate(body), key=lambda item: (-_negative_table_signal(item[1], terms), item[0]))
         selected_indexes = sorted(index for index, row in ranked[:4] if _negative_table_signal(row, terms) > 0)
     else:
@@ -285,7 +285,19 @@ def extract_relevant_quote(content: str, plan: QueryPlan, *, chunk_type: str = "
 
 def infer_facet(content: str, plan: QueryPlan) -> str:
     folded = content.casefold()
-    if plan.intent == "business_evaluation":
+    active_intents = set(plan.active_intents)
+    if active_intents & {"negative_signal_summary", "risk_explanation"}:
+        if any(marker in folded for marker in ("threshold", "limit", "warning", "breach", "阈值", "限额", "红色", "黄色", "预警")):
+            return "threshold_pressure"
+        if any(marker in folded for marker in MANAGEMENT_MARKERS):
+            return "management_concerns"
+        if any(marker in folded for marker in ("concentration", "exposure", "集中", "暴露")):
+            return "risk_concentration"
+        if any(marker in folded for marker in ("decline", "drop", "below", "deteriorat", "下降", "下滑", "恶化", "低于", "未达", "承压")):
+            return "deteriorating_metrics"
+        if any(marker in folded for marker in RISK_MARKERS):
+            return "explicit_negative_statements"
+    if "business_evaluation" in active_intents:
         if any(marker in folded for marker in ("cash", "capital", "fsg", "solvency", "现金", "资本", "自由盈余", "偿付")):
             return "cash_capital"
         if any(
@@ -310,18 +322,8 @@ def infer_facet(content: str, plan: QueryPlan) -> str:
         if any(marker in folded for marker in ("growth", "increase", "momentum", "record", "增长", "提升", "动量", "新高", "创纪录")):
             return "growth_momentum"
         return ""
-    if plan.intent not in {"negative_signal_summary", "risk_explanation"}:
+    if not active_intents & {"negative_signal_summary", "risk_explanation"}:
         return plan.required_facets[0] if plan.required_facets else "direct_answer"
-    if any(marker in folded for marker in ("threshold", "limit", "warning", "breach", "阈值", "限额", "红色", "黄色", "预警")):
-        return "threshold_pressure"
-    if any(marker in folded for marker in MANAGEMENT_MARKERS):
-        return "management_concerns"
-    if any(marker in folded for marker in ("concentration", "exposure", "集中", "暴露")):
-        return "risk_concentration"
-    if any(marker in folded for marker in ("decline", "drop", "below", "deteriorat", "下降", "下滑", "恶化", "低于", "未达", "承压")):
-        return "deteriorating_metrics"
-    if any(marker in folded for marker in RISK_MARKERS):
-        return "explicit_negative_statements"
     return ""
 
 
@@ -439,7 +441,7 @@ class EvidencePack:
                 if plan.answer_language == "zh"
                 else "The current document does not contain enough relevant business evidence to answer this question."
             )
-        if plan.intent == "negative_signal_summary":
+        if plan.intent == "negative_signal_summary" and not plan.is_composite:
             heading = (
                 "文档中最明确的负面信号或管理层关注事项是："
                 if plan.answer_language == "zh"
@@ -490,7 +492,8 @@ class EvidencePackBuilder:
             ):
                 rejected_quality["visual_numeric"] = rejected_quality.get("visual_numeric", 0) + 1
                 continue
-            if plan.intent in {"negative_signal_summary", "risk_explanation"}:
+            exclusive_negative = set(plan.active_intents) <= {"negative_signal_summary", "risk_explanation"}
+            if exclusive_negative:
                 if _is_heading_like_negative(content):
                     rejected_quality["heading_like"] = rejected_quality.get("heading_like", 0) + 1
                     continue
@@ -502,7 +505,11 @@ class EvidencePackBuilder:
                     rejected_quality["all_green_status_table"] = rejected_quality.get("all_green_status_table", 0) + 1
                     continue
             facet = infer_facet(content, plan)
-            if plan.intent in {"business_evaluation", "negative_signal_summary", "risk_explanation"} and not facet:
+            if (
+                not plan.is_composite
+                and plan.intent in {"business_evaluation", "negative_signal_summary", "risk_explanation"}
+                and not facet
+            ):
                 continue
             quote = extract_relevant_quote(content, plan, chunk_type=str(row.get("chunk_type") or "text"))
             if not quote:

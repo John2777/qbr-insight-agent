@@ -85,3 +85,92 @@ def test_llm_provider_failure_is_explicit_and_uses_safe_fallback(tmp_path: Path,
     assert "provider unavailable" not in str(result.model)
     assert '"event":"provider_call_failed"' in caplog.text
     assert '"run_id":"run_provider_failure"' in caplog.text
+
+
+def test_llm_rejects_positive_document_summary_for_negative_intent(tmp_path: Path) -> None:
+    fallback = "文档中最明确的负面信号是：\n\n**阈值事项**\n\n- Risk concentration 超过限额。[1]"
+    candidate = (
+        "## 总体判断\n\n公司业绩整体上行。[1]\n\n"
+        "## 关键趋势\n\n核心指标保持增长。[1]\n\n"
+        "## 经营解读\n\n增长动量延续。[1]\n\n"
+        "## 建议关注\n\n后续继续关注执行风险。[1]"
+    )
+    negative_evidence = [
+        {
+            "document_title": "FY25 QBR",
+            "slide_no": 1,
+            "source_kind": "native_ooxml",
+            "confidence": 1.0,
+            "quote": "Risk concentration exceeded the approved limit.",
+        }
+    ]
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
+
+    result = agent.answer(
+        question="当前文档有哪些潜在问题？",
+        deterministic_answer=fallback,
+        evidence=negative_evidence,
+        history=[],
+        answer_mode="negative_signal_summary",
+        query_plan={"intent": "negative_signal_summary"},
+    )
+
+    assert result.answer == fallback
+    assert result.warnings == ["LLM_QUERY_ADHERENCE_FAILED"]
+
+
+def test_llm_accepts_issue_focused_answer_for_negative_intent(tmp_path: Path) -> None:
+    fallback = "文档中最明确的负面信号是：Risk concentration 超过限额。[1]"
+    candidate = "潜在问题主要是风险集中度超过限额，需要管理层关注。[1]"
+    negative_evidence = [
+        {
+            "document_title": "FY25 QBR",
+            "slide_no": 1,
+            "source_kind": "native_ooxml",
+            "confidence": 1.0,
+            "quote": "Risk concentration exceeded the approved limit.",
+        }
+    ]
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
+
+    result = agent.answer(
+        question="当前文档有哪些潜在问题？",
+        deterministic_answer=fallback,
+        evidence=negative_evidence,
+        history=[],
+        answer_mode="negative_signal_summary",
+        query_plan={"intent": "negative_signal_summary"},
+    )
+
+    assert result.answer == candidate
+    assert result.warnings == []
+
+
+def test_llm_allows_summary_structure_when_negative_analysis_is_one_part_of_composite_task(tmp_path: Path) -> None:
+    fallback = "## 文档概览\n\n整体增长。[1]\n\n## 潜在问题与风险\n\n风险集中度偏高。[1]"
+    candidate = "## 总体判断\n\n增长延续，但风险集中度偏高。[1]\n\n## 建议关注\n\n需要降低集中度。[1]"
+    composite_evidence = [
+        {
+            "document_title": "FY25 QBR",
+            "slide_no": 1,
+            "source_kind": "native_ooxml",
+            "confidence": 1.0,
+            "quote": "Growth continued, while risk concentration remained elevated.",
+        }
+    ]
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
+
+    result = agent.answer(
+        question="请总结优势和潜在问题。",
+        deterministic_answer=fallback,
+        evidence=composite_evidence,
+        history=[],
+        answer_mode="business_evaluation",
+        query_plan={
+            "intent": "business_evaluation",
+            "secondary_intents": ["negative_signal_summary", "summary"],
+        },
+    )
+
+    assert result.answer == candidate
+    assert result.warnings == []

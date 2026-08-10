@@ -7,8 +7,24 @@ import pytest
 from packages.qbr_core import DeterministicAnswerEngine, QAApplicationService, QBRService, Settings
 from packages.qbr_core.errors import Conflict, ResourceNotFound
 from packages.qbr_core.lease import LeaseCoordinator, LeasePolicy
+from packages.qbr_core.service_ingestion import IngestionService
+from packages.qbr_core.service_persistence import ParsedPersistenceService
+from packages.qbr_core.service_resources import ResourceService
 
 ROOT = Path(__file__).parents[2]
+PYTHON_SOURCE_ROOTS = ("apps", "packages", "scripts", "tests")
+MAX_PYTHON_FILE_LINES = 700
+
+
+def test_python_source_files_stay_within_size_limit() -> None:
+    violations: list[str] = []
+    for source_root in PYTHON_SOURCE_ROOTS:
+        for path in (ROOT / source_root).rglob("*.py"):
+            line_count = len(path.read_text(encoding="utf-8").splitlines())
+            if line_count > MAX_PYTHON_FILE_LINES:
+                violations.append(f"{path.relative_to(ROOT)}: {line_count} lines")
+
+    assert not violations, "Python files exceed the 700-line limit:\n" + "\n".join(sorted(violations))
 
 
 def test_composition_root_wires_explicit_application_boundaries(tmp_path: Path) -> None:
@@ -22,6 +38,28 @@ def test_composition_root_wires_explicit_application_boundaries(tmp_path: Path) 
     assert service.qa_service.answer_engine.db is service.db
     assert service.qa_service.answer_engine.retriever is service.retriever
     assert service.qa_service.leases is service.leases
+
+
+def test_qbr_service_uses_components_instead_of_mixin_inheritance(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+
+    assert QBRService.__bases__ == (object,)
+    assert isinstance(service.ingestion, IngestionService)
+    assert isinstance(service.persistence, ParsedPersistenceService)
+    assert isinstance(service.resources, ResourceService)
+    assert service.ingestion._root is service
+    assert service.persistence._root is service
+    assert service.resources._root is service
+
+
+def test_query_planning_module_remains_a_small_compatibility_facade() -> None:
+    facade = ROOT / "packages/qbr_core/query_planning.py"
+    source = facade.read_text(encoding="utf-8")
+
+    assert len(source.splitlines()) <= 20
+    assert "from .query_models import QueryPlan, RetrievalQuery" in source
+    assert "from .query_builder import deterministic_plan" in source
+    assert "from .planner_agent import QueryPlannerAgent" in source
 
 
 def test_lease_policy_rejects_unsafe_heartbeat_timing() -> None:

@@ -1,7 +1,7 @@
 {
   "dataset": "qbr-query-pipeline",
-  "version": "1.0.0",
-  "description": "Bilingual intent, query-expansion, constraint-preservation and content-policy regression cases for QBR retrieval planning.",
+  "version": "2.0.0",
+  "description": "Bilingual TaskFrame, primary/secondary intent, operation, query-expansion, constraint and content-policy regression cases for QBR planning.",
   "cases": [
     {
       "id": "plan-001",
@@ -296,6 +296,118 @@
       "expected_language": "zh",
       "required_query_terms": ["execution risk", "风险闸门", "优先事项"],
       "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-033",
+      "question": "当前文档里能找到哪些公司潜在的问题？",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "zh",
+      "required_query_terms": ["risk concentration", "管理关注点"],
+      "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-034",
+      "question": "这家公司可能存在哪些经营隐患？",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "zh",
+      "required_query_terms": ["deteriorating trend", "风险"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-035",
+      "question": "哪些方面看起来需要警惕？",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "zh",
+      "required_query_terms": ["warning threshold", "挑战"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-036",
+      "question": "Where are the weak spots in this business?",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "en",
+      "required_query_terms": ["risk concentration", "管理关注点"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-037",
+      "question": "What potential issues should management investigate in this deck?",
+      "expected_intent": "negative_signal_summary",
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "en",
+      "required_query_terms": ["management concern", "风险"],
+      "excluded_roles": ["provenance", "methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-038",
+      "question": "当前文档有哪些核心增长指标？",
+      "expected_intent": "evidence_answer",
+      "expected_language": "zh",
+      "required_query_terms": ["growth increase"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-039",
+      "question": "请总结当前文档的核心指标。",
+      "expected_intent": "summary",
+      "expected_language": "zh",
+      "required_query_terms": ["executive summary", "执行摘要"],
+      "excluded_roles": ["methodology"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-040",
+      "question": "公司计划如何解决这些问题？",
+      "expected_intent": "evidence_answer",
+      "expected_language": "zh",
+      "required_query_terms": ["公司计划如何解决这些问题"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-041",
+      "question": "VONB是什么含义，并分析图中的趋势？",
+      "expected_intent": "term_definition",
+      "expected_secondary_intents": ["chart_analysis"],
+      "required_operations": ["define_term", "analyze_chart"],
+      "expected_language": "zh",
+      "required_query_terms": ["value of new business", "趋势"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-042",
+      "question": "请总结公司的优势和潜在问题。",
+      "expected_intent": "business_evaluation",
+      "expected_secondary_intents": ["negative_signal_summary", "summary"],
+      "required_operations": ["evaluate_business", "assess_downside", "synthesize_summary"],
+      "expected_evaluation_polarity": "balanced",
+      "expected_language": "zh",
+      "required_query_terms": ["strength advantage", "risk concentration"],
+      "excluded_roles": ["provenance"],
+      "hard_constraints": []
+    },
+    {
+      "id": "plan-043",
+      "question": "哪些数据是公开披露或模拟数据，同时有什么主要风险？",
+      "expected_intent": "negative_signal_summary",
+      "expected_secondary_intents": ["provenance"],
+      "required_operations": ["assess_downside", "verify_provenance"],
+      "expected_evaluation_polarity": "negative",
+      "expected_language": "zh",
+      "required_query_terms": ["management concern", "official sources"],
+      "excluded_roles": ["boilerplate"],
       "hard_constraints": []
     }
   ]

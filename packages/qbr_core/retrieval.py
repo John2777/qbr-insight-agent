@@ -268,7 +268,7 @@ class EvidenceRetriever:
                 rejected_roles[role] = rejected_roles.get(role, 0) + 1
                 continue
             content = str(row.get("content") or "").casefold()
-            task_bonus = self._task_compatibility(plan.intent, role, content)
+            task_bonus = max(self._task_compatibility(intent, role, content) for intent in plan.active_intents)
             row["content_role"] = role
             row["matched_queries"] = matched_queries.get(chunk_id, [])
             row["multi_query_score"] = round(scores[chunk_id], 8)
@@ -289,6 +289,7 @@ class EvidenceRetriever:
             " | ".join(item.text for item in plan.retrieval_queries),
             {
                 "intent": plan.intent,
+                "active_intents": list(plan.active_intents),
                 "query_count": len(plan.retrieval_queries),
                 "unique_candidates": len(fused),
                 "eligible_candidates": len(ranked),

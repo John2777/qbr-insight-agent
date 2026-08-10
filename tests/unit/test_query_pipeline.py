@@ -9,9 +9,7 @@ from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.db import utc_now
-from packages.qbr_core.evaluation_analysis import EvaluativeSignalAnalyzer
-from packages.qbr_core.evidence import EvidencePack, EvidencePackBuilder, extract_relevant_quote
-from packages.qbr_core.negative_analysis import NegativeSignalAnalyzer
+from packages.qbr_core.evidence import EvidencePackBuilder, extract_relevant_quote
 from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
 from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
 
@@ -205,6 +203,44 @@ def test_negative_question_plan_is_bilingual_and_excludes_source_notes() -> None
     assert "provenance" in plan.excluded_content_roles
 
 
+def test_latent_issue_phrasings_share_negative_discovery_intent_without_summary_drift() -> None:
+    negative_questions = (
+        "当前文档里能找到哪些公司潜在的问题？",
+        "这家公司可能存在哪些经营隐患？",
+        "哪些方面看起来需要警惕？",
+        "Where are the weak spots in this business?",
+        "What potential issues should management investigate in this deck?",
+    )
+
+    for question in negative_questions:
+        plan = deterministic_plan(question)
+        assert plan.intent == "negative_signal_summary", question
+        assert plan.evaluation_polarity == "negative", question
+
+    assert deterministic_plan("当前文档有哪些核心增长指标？").intent == "evidence_answer"
+    assert deterministic_plan("请总结当前文档的核心指标。").intent == "summary"
+    assert deterministic_plan("公司计划如何解决这些问题？").intent == "evidence_answer"
+
+
+def test_task_frame_preserves_multiple_user_goals_and_builds_multi_route_queries() -> None:
+    term_and_chart = deterministic_plan("VONB是什么含义，并分析图中的趋势？")
+    balanced_summary = deterministic_plan("请总结公司的优势和潜在问题。")
+    provenance_and_risk = deterministic_plan("哪些数据是公开披露或模拟数据，同时有什么主要风险？")
+
+    assert term_and_chart.active_intents == ("term_definition", "chart_analysis")
+    assert term_and_chart.operations == ("define_term", "analyze_chart")
+    assert "value of new business" in " ".join(item.text for item in term_and_chart.retrieval_queries).casefold()
+
+    assert balanced_summary.active_intents == ("business_evaluation", "negative_signal_summary", "summary")
+    assert balanced_summary.evaluation_polarity == "balanced"
+    assert {"evaluate_business", "assess_downside", "synthesize_summary"} <= set(balanced_summary.operations)
+
+    assert provenance_and_risk.active_intents == ("negative_signal_summary", "provenance")
+    assert "provenance" in {item.kind for item in provenance_and_risk.retrieval_queries}
+    assert "provenance" in provenance_and_risk.allowed_content_roles
+    assert "provenance" not in provenance_and_risk.excluded_content_roles
+
+
 def test_execution_risk_explanation_has_dedicated_intent_and_retrieval_routes() -> None:
     plan = deterministic_plan("所谓的执行风险具体是指什么？")
     queries = " ".join(item.text for item in plan.retrieval_queries).casefold()
@@ -299,6 +335,47 @@ def test_model_planner_can_promote_ambiguous_evaluative_question_with_polarity()
     assert "growth_momentum" in plan.required_facets
     assert plan.retrieval_queries[0].text == "Where does the company stand out?"
     assert any("capital buffer" in item.text for item in plan.retrieval_queries)
+
+
+def test_model_planner_can_correct_a_non_generic_baseline_without_erasing_original_route() -> None:
+    model = PlannerModel(
+        json.dumps(
+            {
+                "canonical_question": "verify sources while retaining the requested overview",
+                "intent": "provenance",
+                "secondary_intents": ["summary"],
+                "operations": ["verify_provenance", "synthesize_summary"],
+                "intent_confidence": 0.94,
+                "retrieval_queries": [{"text": "official disclosure source boundary", "kind": "source_check"}],
+            }
+        )
+    )
+
+    plan = QueryPlannerAgent(model).plan("请总结这份文档，并说明哪些结论可以追溯核验。")
+
+    assert plan.intent == "provenance"
+    assert plan.secondary_intents == ("summary",)
+    assert plan.operations == ("verify_provenance", "synthesize_summary")
+    assert plan.diagnostics["model_intent_promoted"] is True
+    assert "official disclosure" in " ".join(item.text for item in plan.retrieval_queries)
+
+
+def test_model_planner_does_not_dilute_high_confidence_term_intent_without_explicit_secondary_task() -> None:
+    model = PlannerModel(
+        json.dumps(
+            {
+                "canonical_question": "define VONB",
+                "intent": "summary",
+                "intent_confidence": 0.99,
+                "retrieval_queries": [],
+            }
+        )
+    )
+
+    plan = QueryPlannerAgent(model).plan("VONB是什么意思？")
+
+    assert plan.active_intents == ("term_definition",)
+    assert plan.operations == ("define_term",)
 
 
 def test_planner_provider_failure_has_deterministic_fallback(caplog: LogCaptureFixture) -> None:
@@ -423,330 +500,6 @@ def test_evidence_pack_filters_provenance_and_preserves_table_rows() -> None:
     }
 
 
-def test_negative_analyzer_derives_trends_and_distinguishes_green_gates() -> None:
-    plan = deterministic_plan("what is the bad news in this ppt")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "financial-table",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s6",
-            "slide_no": 6,
-            "element_id": "e6",
-            "chunk_type": "table",
-            "content": (
-                "核心财务指标 | 2023A | 2024A | 2025A | 同比/变化 | 单位\nShareholder capital ratio | 269% | 236% | 221% | -15ppt | %"
-            ),
-        },
-        {
-            "id": "green-gates",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s7",
-            "slide_no": 7,
-            "element_id": "e7",
-            "chunk_type": "table",
-            "content": ("风险闸门 | 绿 | 黄 | 红 | 当前\nVONB增速 | >12% | 5-12% | <5% | 15%\n资本比率 | >210% | 190-210% | <190% | 221%"),
-        },
-        {
-            "id": "management-action",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s7",
-            "slide_no": 7,
-            "element_id": "e8",
-            "chunk_type": "text",
-            "content": "强化高净值、保障与跨境服务，控制产品集中度。",
-        },
-    ]
-    chart_rows = []
-    for series_id, series_name, previous, current in (
-        ("digital-stp", "Digital STP", 73.8, 72.1),
-        ("persistency", "Persistency", 90.8, 90.1),
-        ("other-markets", "其他市场", 134.0, 129.0),
-    ):
-        for point_order, category, value in ((1, "26/02", previous), (2, "26/03", current)):
-            chart_rows.append(
-                {
-                    "series_id": series_id,
-                    "series_name": series_name,
-                    "point_order": point_order,
-                    "category": category,
-                    "y_value": value,
-                    "display_value": str(value),
-                    "document_version_id": "dv",
-                    "document_id": "doc",
-                    "slide_id": "s3",
-                    "slide_no": 3,
-                    "element_id": "shared-chart-element",
-                    "chart_title": "Monthly KPI trends",
-                }
-            )
-
-    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=chart_rows)
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert assessment.explicit_red_flags is False
-    assert "No red/amber threshold breach" in answer
-    assert "236%" in answer and "221%" in answer and "15 percentage points" in answer
-    assert "Digital STP" in answer and "Persistency" in answer
-    assert "其他市场" not in answer
-    assert "控制产品集中度" in answer
-    assert "enough relevant business evidence" not in answer
-    assert {item["analysis_method"] for item in evidence} == {
-        "structured_table_trend",
-        "structured_chart_trend",
-        "management_action_inference",
-    }
-    assert warnings == []
-
-
-def test_execution_risk_explanation_synthesizes_definition_signals_and_gate_boundary() -> None:
-    plan = deterministic_plan("所谓的执行风险具体是指什么？")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "capital-trend",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s2",
-            "slide_no": 2,
-            "element_id": "e2",
-            "chunk_type": "table",
-            "content": "Metric | 2024A | 2025A | Change\nShareholder capital ratio | 236% | 221% | -15ppt",
-        },
-        {
-            "id": "risk-gates",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s5",
-            "slide_no": 5,
-            "element_id": "e5",
-            "chunk_type": "table",
-            "content": "风险闸门 | 绿 | 黄 | 红 | 当前\n资本比率 | >210% | 190-210% | <190% | 221%",
-        },
-        {
-            "id": "management-action",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s6",
-            "slide_no": 6,
-            "element_id": "e6",
-            "chunk_type": "text",
-            "content": "强化高净值、保障与跨境服务，控制产品集中度。",
-        },
-    ]
-    chart_rows = [
-        {
-            "series_id": "persistency",
-            "series_name": "Persistency 13M",
-            "point_order": point_order,
-            "category": period,
-            "y_value": value,
-            "display_value": f"{value}%",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s3",
-            "slide_no": 3,
-            "element_id": "execution-chart",
-            "chart_title": "Monthly execution indicators",
-        }
-        for point_order, period, value in ((1, "26/02", 90.8), (2, "26/03", 89.4))
-    ]
-
-    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=chart_rows)
-    answer, evidence, warnings = assessment.render_explanation(plan)
-
-    assert "## 直接解释" in answer
-    assert "既定经营目标和优先事项在落地过程中偏离计划" in answer
-    assert "## 在这份 PPT 中的具体表现" in answer
-    assert "Persistency 13M" in answer
-    assert "控制产品集中度" in answer
-    assert "## 如何判断是否升级为实际问题" in answer
-    assert "绿色也不等于未来没有风险" in answer
-    assert "24/10=55.5" not in answer
-    assert any(item.get("element_id") == "execution-chart" for item in evidence)
-    assert warnings == []
-
-
-def test_negative_analyzer_reports_no_red_flags_instead_of_insufficient_evidence() -> None:
-    plan = deterministic_plan("what is the bad news in this ppt")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "green-gates",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s1",
-            "slide_no": 1,
-            "element_id": "e1",
-            "chunk_type": "table",
-            "content": "Risk gate | Green | Amber | Red | Current\nCapital ratio | >210% | 190-210% | <190% | 221%",
-        }
-    ]
-
-    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert answer.startswith("No explicit negative result or breached threshold")
-    assert "misleading to manufacture bad news" in answer
-    assert len(evidence) == 1
-    assert warnings == []
-
-
-def test_negative_analyzer_distinguishes_no_adverse_signal_from_no_business_content() -> None:
-    plan = deterministic_plan("what is the bad news in this ppt")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "positive-business-content",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s1",
-            "slide_no": 1,
-            "element_id": "e1",
-            "chunk_type": "text",
-            "content": "Revenue growth remained above target and the capital ratio stayed within the green range.",
-        }
-    ]
-
-    assessment = NegativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert answer.startswith("No explicit negative statement")
-    assert "does not support a specific bad-news claim" in answer
-    assert "enough relevant business evidence" not in answer
-    assert evidence == []
-    assert warnings == []
-
-
-def test_evaluative_analyzer_derives_strengths_and_balances_counterevidence() -> None:
-    plan = deterministic_plan("公司的优势在哪些点上")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "financial-table",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s2",
-            "slide_no": 2,
-            "element_id": "e2",
-            "chunk_type": "table",
-            "content": (
-                "核心财务指标 | 2024A | 2025A | 同比/变化 | 单位\n"
-                "VONB / 新业务价值 | 4,712 | 5,516 | +15% CER | US$m\n"
-                "Net FSG / 净自由盈余产生 | 4,020 | 4,451 | +14%/股 | US$m\n"
-                "Shareholder capital ratio | 236% | 221% | -15ppt | %"
-            ),
-        },
-        {
-            "id": "green-gates",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s3",
-            "slide_no": 3,
-            "element_id": "e3",
-            "chunk_type": "table",
-            "content": "指标 | 当前 | 阈值\n最大市场占比 | 41% | <45%\n组合增长 | +15% | >10%",
-        },
-    ]
-    categorical_chart = [
-        {
-            "series_id": "fy2024",
-            "series_name": "FY2024",
-            "point_order": 1,
-            "category": "Singapore",
-            "y_value": 380,
-            "document_version_id": "dv",
-            "slide_id": "s4",
-            "slide_no": 4,
-            "element_id": "e4",
-        },
-        {
-            "series_id": "fy2024",
-            "series_name": "FY2024",
-            "point_order": 2,
-            "category": "Other markets",
-            "y_value": 1072,
-            "document_version_id": "dv",
-            "slide_id": "s4",
-            "slide_no": 4,
-            "element_id": "e4",
-        },
-    ]
-
-    assessment = EvaluativeSignalAnalyzer().analyze(
-        plan,
-        explicit_pack=empty_pack,
-        chunks=chunks,
-        chart_rows=categorical_chart,
-    )
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert "公司的优势主要体现在" in answer
-    assert "VONB" in answer and "Net FSG" in answer
-    assert "最大市场占比" in answer
-    assert "Shareholder capital ratio" in answer and "需要平衡看待" in answer
-    assert "Singapore" not in answer and "Other markets" not in answer
-    assert {item["analysis_method"] for item in evidence} == {
-        "structured_table_improvement",
-        "structured_threshold_strength",
-        "structured_table_trend",
-    }
-    assert warnings == []
-
-
-def test_evaluative_analyzer_does_not_claim_strength_without_comparison_basis() -> None:
-    plan = deterministic_plan("What are the company's strengths?")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "descriptive",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s1",
-            "slide_no": 1,
-            "element_id": "e1",
-            "chunk_type": "text",
-            "content": "The company operates through agency and partnership channels across several markets.",
-        }
-    ]
-
-    assessment = EvaluativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert answer.startswith("The document contains business content")
-    assert "does not justify a company-strength claim" in answer
-    assert evidence == []
-    assert warnings == ["NO_COMPARATIVE_STRENGTH_EVIDENCE"]
-
-
-def test_evaluative_analyzer_turns_management_actions_into_evidenced_opportunities() -> None:
-    plan = deterministic_plan("下一阶段有哪些增长机会？")
-    empty_pack = EvidencePack((), (), plan.required_facets, False)
-    chunks = [
-        {
-            "id": "action",
-            "document_version_id": "dv",
-            "document_id": "doc",
-            "slide_id": "s1",
-            "slide_no": 1,
-            "element_id": "e1",
-            "chunk_type": "text",
-            "content": "降低新业务资本强度，提升净FSG转化。",
-        }
-    ]
-
-    assessment = EvaluativeSignalAnalyzer().analyze(plan, explicit_pack=empty_pack, chunks=chunks, chart_rows=[])
-    answer, evidence, warnings = assessment.render(plan)
-
-    assert "可执行的改进或增长机会" in answer
-    assert "降低新业务资本强度" in answer
-    assert evidence[0]["analysis_method"] == "management_action_opportunity"
-    assert warnings == []
-
-
 def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_path: Path) -> None:
     service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
     document_id = _seed_pipeline_document(service)
@@ -769,6 +522,33 @@ def test_multiroute_retrieval_and_end_to_end_answer_reject_badcase_sources(tmp_p
     assert message["metadata"]["pipeline_version"] == "planned-evidence-v2"
     assert message["metadata"]["negative_assessment"]["signal_count"] == 2
     assert {citation["slide_no"] for citation in message["citations"]} == {1, 2}
+
+
+def test_latent_issue_question_cannot_be_overridden_by_document_summary_route(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_pipeline_document(service)
+    conversation = service.create_conversation("ws_demo", "user_demo", [document_id])
+    queued = service.ask(
+        conversation["id"],
+        "当前文档里能找到哪些公司潜在的问题？",
+        "ws_demo",
+        "user_demo",
+    )
+
+    service.process_next_run("latent-issue-routing-test")
+    result = service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    message = next(item for item in result["messages"] if item["id"] == queued["assistant_message_id"])
+
+    assert message["metadata"]["query_plan"]["intent"] == "negative_signal_summary"
+    assert message["metadata"]["answer_routing"]["intent"] == "negative_signal_summary"
+    assert message["metadata"]["answer_routing"]["active_intents"] == ["negative_signal_summary"]
+    assert message["metadata"]["answer_routing"]["strategy"] == "specialized"
+    assert message["metadata"]["answer_routing"]["source"] == "query_plan"
+    assert "Risk concentration" in message["content"]
+    assert "Margin" in message["content"]
+    assert "## 总体判断" not in message["content"]
+    assert "核心图表指标整体上行" not in message["content"]
+    assert message["metadata"]["negative_assessment"]["signal_count"] == 2
 
 
 def test_execution_risk_question_returns_explanation_not_retrieval_dump(tmp_path: Path) -> None:
@@ -819,6 +599,29 @@ def test_strength_question_runs_multiroute_retrieval_and_structured_evaluation(t
     assert {citation["slide_no"] for citation in message["citations"]} >= {1, 2, 3}
 
 
+def test_composite_business_question_combines_summary_strength_and_downside_routes(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_strength_document(service)
+    conversation = service.create_conversation("ws_demo", "user_demo", [document_id])
+    queued = service.ask(conversation["id"], "请总结公司的优势和潜在问题。", "ws_demo", "user_demo")
+
+    service.process_next_run("composite-business-task-frame-test")
+    result = service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    message = next(item for item in result["messages"] if item["id"] == queued["assistant_message_id"])
+
+    assert message["metadata"]["query_plan"]["active_intents"] == [
+        "business_evaluation",
+        "negative_signal_summary",
+        "summary",
+    ]
+    assert message["metadata"]["answer_routing"]["strategy"] == "composite"
+    assert "## 优势与经营评价" in message["content"]
+    assert "## 潜在问题与风险" in message["content"]
+    assert "## 文档概览" in message["content"]
+    assert "VONB" in message["content"]
+    assert message["citations"]
+
+
 def test_query_planning_benchmark_contract() -> None:
     dataset = json.loads((ROOT / "benchmarks/qbr_query_pipeline/cases.json").read_text(encoding="utf-8"))
 
@@ -830,6 +633,10 @@ def test_query_planning_benchmark_contract() -> None:
         assert plan.intent == case["expected_intent"], case["id"]
         if "expected_evaluation_polarity" in case:
             assert plan.evaluation_polarity == case["expected_evaluation_polarity"], case["id"]
+        if "expected_secondary_intents" in case:
+            assert list(plan.secondary_intents) == case["expected_secondary_intents"], case["id"]
+        if "required_operations" in case:
+            assert all(operation in plan.operations for operation in case["required_operations"]), case["id"]
         assert plan.answer_language == case["expected_language"], case["id"]
         assert plan.retrieval_queries[0].text == case["question"], case["id"]
         assert all(term.casefold() in query_corpus for term in case.get("required_query_terms", [])), case["id"]

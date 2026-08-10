@@ -336,6 +336,9 @@ class QAApplicationService:
                     "query_plan",
                     {
                         "intent": plan.intent,
+                        "secondary_intents": list(plan.secondary_intents),
+                        "operations": list(plan.operations),
+                        "intent_confidence": plan.intent_confidence,
                         "profile": plan.execution_profile,
                         "planner": plan.planner,
                         "queries": [item.to_dict() for item in plan.retrieval_queries],
@@ -359,7 +362,8 @@ class QAApplicationService:
                 "planner": plan.planner,
             }
             selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
-            if selected_agent and evidence and answer_mode != "term_definition":
+            single_term_definition = plan.active_intents == ("term_definition",)
+            if selected_agent and evidence and not single_term_definition:
                 with self.db.transaction(immediate=True) as conn:
                     self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
                 generated = selected_agent.answer(
@@ -374,18 +378,19 @@ class QAApplicationService:
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
                 model_info = {**generated.model, "answer_mode": answer_mode, "planner": plan.planner}
-            elif answer_mode == "term_definition":
+            elif single_term_definition:
                 model_info["status"] = "skipped_curated_glossary"
             message_metadata = {
                 "answer_mode": answer_mode,
-                "show_visuals": answer_mode != "term_definition",
+                "show_visuals": not single_term_definition,
                 "knowledge_source": (
-                    "curated_glossary+document" if answer_mode == "term_definition" and evidence
-                    else "curated_glossary" if answer_mode == "term_definition"
+                    "curated_glossary+document" if "term_definition" in plan.active_intents and evidence
+                    else "curated_glossary" if single_term_definition
                     else "document_evidence"
                 ),
                 "pipeline_version": "planned-evidence-v2",
                 "query_plan": plan.to_dict(),
+                "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
                 "evaluation_assessment": answer_result.diagnostics.get("evaluation_assessment", {}),

@@ -32,6 +32,10 @@ SYSTEM_PROMPT = """你是 QBR Insight Agent，一个受控的企业文档证据�
    术语解释不得附带用户未询问的市场、期间、指标数值或图表分析。
 10. 当回答类型是 risk_explanation 时，必须先解释风险概念，再说明它在当前文档中的具体表现、判定阈值和边界；
     不得把原始图表长序列或检索片段逐条粘贴到回答中。
+11. 当回答类型是 negative_signal_summary 时，只回答文档支持的问题、恶化信号、阈值事项和管理关注点；
+    明确区分已发生问题与潜在隐患。不得改写成业绩概览，也不得用正向指标替代风险结论；若没有负面证据，应明确说明证据边界。
+12. 查询计划可能包含 secondary_intents 和 operations。此时必须覆盖用户的每个子任务，并融合成一份连贯回答；
+    不得因为 primary intent 而忽略定义、趋势、风险、来源、比较或建议等次要任务。
 """
 
 
@@ -142,13 +146,14 @@ class EvidenceQAAgent:
         ) or "（无）"
         user_prompt = (
             f"用户问题：\n{state['question']}\n\n"
-            f"回答类型：{state.get('answer_mode', 'evidence_answer')}\n\n"
+            f"主回答类型：{state.get('answer_mode', 'evidence_answer')}\n\n"
             f"查询计划（只用于约束意图、范围和覆盖面）：\n{state.get('query_plan', {})}\n\n"
             f"最近会话（仅作指代上下文，不是证据）：\n{history_text}\n\n"
             f"已验证结果（其中计算值已经由确定性工具完成）：\n{state['deterministic_answer']}\n\n"
             f"编号证据：\n{evidence_text}\n\n"
             "请先直接回答用户问题，只保留与问题相关的关键数字，并把引用放在对应结论之后。"
-            "如果是概括性问题，使用管理层可扫描的四段结构，避免大段堆砌证据原文。"
+            "只有回答类型为 summary 时才使用管理层可扫描的四段概览结构；"
+            "negative_signal_summary 必须围绕问题、恶化、阈值和关注点组织，避免大段堆砌证据原文。"
         )
         started = time.perf_counter()
         try:

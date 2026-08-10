@@ -54,10 +54,19 @@ class ClaimEvidenceVerifier:
             warnings.append("LLM_NUMERIC_VALIDATION_FAILED")
 
         intent = str((query_plan or {}).get("intent") or "evidence_answer")
+        secondary_intents = (query_plan or {}).get("secondary_intents") or []
+        active_intents = tuple(
+            dict.fromkeys(
+                (
+                    intent,
+                    *(str(item) for item in secondary_intents if str(item)),
+                )
+            )
+        )
         roles = {str(item.get("content_role") or "unknown") for item in evidence}
         if (
             evidence
-            and intent != "provenance"
+            and "provenance" not in active_intents
             and roles
             and "unknown" not in roles
             and roles <= {"provenance", "methodology", "boilerplate"}
@@ -65,16 +74,46 @@ class ClaimEvidenceVerifier:
             warnings.append("EVIDENCE_ROLE_VALIDATION_FAILED")
 
         folded = answer.casefold()
-        if intent != "provenance" and any(
+        if "provenance" not in active_intents and any(
             marker in folded
             for marker in ("[sources]", "generated visual:", "implemented with two aligned editable", "all monthly management data")
         ):
             warnings.append("LLM_QUERY_ADHERENCE_FAILED")
+
+        intent_alignment = "not_applicable"
+        if active_intents == ("negative_signal_summary",):
+            summary_headings = sum(
+                marker in folded
+                for marker in (
+                    "## 总体判断",
+                    "## 关键趋势",
+                    "## 经营解读",
+                    "## 建议关注",
+                    "## overall assessment",
+                    "## key trends",
+                    "## business interpretation",
+                    "## recommendations",
+                )
+            )
+            adverse_patterns = (
+                r"明确负面|恶化|下滑|下降|回落|放缓|承压|未达|低于.{0,12}(?:目标|阈值)|"
+                r"超过.{0,12}(?:阈值|限额)|突破.{0,12}(?:阈值|限额)|风险集中|潜在问题|隐患|短板|不足|"
+                r"管理关注点|没有发现.{0,20}(?:负面|红灯|阈值)|证据不足|"
+                r"negative|deteriorat|declin|slowdown|underperform|below.{0,12}(?:target|threshold)|"
+                r"above.{0,12}(?:limit|threshold)|breach|risk concentration|downside|weakness|"
+                r"potential issue|problem area|watchpoint|no (?:explicit )?(?:negative|red|amber)"
+            )
+            has_adverse_claim = re.search(adverse_patterns, folded, flags=re.S) is not None
+            intent_alignment = "aligned" if summary_headings < 2 and has_adverse_claim else "mismatch"
+            if intent_alignment == "mismatch":
+                warnings.append("LLM_QUERY_ADHERENCE_FAILED")
 
         diagnostics = {
             "references": sorted(references),
             "valid_references": sorted(valid_references),
             "introduced_numbers": sorted(introduced_numbers),
             "evidence_roles": sorted(roles),
+            "intent_alignment": intent_alignment,
+            "active_intents": list(active_intents),
         }
         return VerificationResult(not warnings, tuple(dict.fromkeys(warnings)), diagnostics)
