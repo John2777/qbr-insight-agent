@@ -338,17 +338,17 @@ class QAApplicationService:
                 document_vocabulary=self._document_vocabulary(str(run["workspace_id"]), document_ids),
                 run_id=run_id,
             )
-            answer_mode = plan.intent
             with self.db.transaction(immediate=True) as conn:
                 self._run_event(
                     conn,
                     run_id,
                     "query_plan",
                     {
-                        "intent": plan.intent,
-                        "secondary_intents": list(plan.secondary_intents),
+                        "task_summary": plan.task_summary,
+                        "answer_brief": plan.answer_brief,
                         "operations": list(plan.operations),
-                        "intent_confidence": plan.intent_confidence,
+                        "evidence_requirements": list(plan.evidence_requirements),
+                        "planner_confidence": plan.planner_confidence,
                         "profile": plan.execution_profile,
                         "planner": plan.planner,
                         "queries": [item.to_dict() for item in plan.retrieval_queries],
@@ -367,46 +367,33 @@ class QAApplicationService:
             model_info: dict[str, Any] = {
                 "provider": self.settings.llm_provider if self.settings.llm_enabled else None,
                 "model": self.settings.llm_model if self.settings.llm_enabled else None,
-                "status": "disabled" if not self.settings.llm_enabled else "skipped_no_evidence",
-                "answer_mode": answer_mode,
+                "status": "disabled" if not self.settings.llm_enabled else "pending",
+                "thinking": "disabled",
                 "planner": plan.planner,
             }
             selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
-            single_term_definition = plan.active_intents == ("term_definition",)
-            if selected_agent and evidence and not single_term_definition:
+            if selected_agent:
                 with self.db.transaction(immediate=True) as conn:
                     self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
                 generated = selected_agent.answer(
                     question=question,
-                    deterministic_answer=answer,
+                    grounding_context=answer,
                     evidence=evidence,
                     history=history,
-                    answer_mode=answer_mode,
-                    query_plan=plan.to_dict(),
+                    task_frame=plan.to_dict(),
                     run_id=run_id,
                 )
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
-                model_info = {**generated.model, "answer_mode": answer_mode, "planner": plan.planner}
-            elif single_term_definition:
-                model_info["status"] = "skipped_curated_glossary"
+                model_info = {**generated.model, "planner": plan.planner}
             message_metadata = {
-                "answer_mode": answer_mode,
-                "show_visuals": not single_term_definition,
-                "knowledge_source": (
-                    "curated_glossary+document"
-                    if "term_definition" in plan.active_intents and evidence
-                    else "curated_glossary"
-                    if single_term_definition
-                    else "document_evidence"
-                ),
-                "pipeline_version": "planned-evidence-v2",
+                "show_visuals": plan.needs_visuals,
+                "knowledge_source": "document_evidence",
+                "pipeline_version": "semantic-task-frame-v1",
                 "query_plan": plan.to_dict(),
                 "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
-                "evaluation_assessment": answer_result.diagnostics.get("evaluation_assessment", {}),
-                "negative_assessment": answer_result.diagnostics.get("negative_assessment", {}),
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
         except Exception as exc:
@@ -525,8 +512,6 @@ class QAApplicationService:
             (run_id, event_type, self.db.json(data), utc_now()),
         )
 
-    # Transitional private-policy shims. Public orchestration stays here while
-    # deterministic evidence reasoning belongs to DeterministicAnswerEngine.
     def _answer(
         self,
         question: str,
@@ -537,37 +522,6 @@ class QAApplicationService:
 
     def _table_reasoning_answer(self, question: str, sources: list[dict[str, Any]]) -> Any:
         return self.answer_engine._table_reasoning_answer(question, sources)
-
-    def _constraint_abstention(
-        self,
-        question: str,
-        chunks: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]] | None:
-        return self.answer_engine._constraint_abstention(question, chunks)
-
-    def _chart_comparison_answer(
-        self,
-        question: str,
-        chart_rows: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]] | None:
-        return self.answer_engine._chart_comparison_answer(question, chart_rows)
-
-    def _rank_chart_points(
-        self,
-        question: str,
-        rows: list[dict[str, Any]],
-    ) -> list[tuple[int, dict[str, Any]]]:
-        return self.answer_engine._rank_chart_points(question, rows)
-
-    def _axis_descriptor(self, row: dict[str, Any]) -> str:
-        return self.answer_engine._axis_descriptor(row)
-
-    def _chart_answer(
-        self,
-        question: str,
-        ranked: list[tuple[int, dict[str, Any]]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]]:
-        return self.answer_engine._chart_answer(question, ranked)
 
     def get_run(self, run_id: str, workspace_id: str) -> dict[str, Any]:
         with self.db.read() as conn:

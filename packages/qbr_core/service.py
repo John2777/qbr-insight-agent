@@ -81,10 +81,10 @@ class QBRService:
         )
         planner_model = None
         if self.qa_agent is not None:
-            planner_model = (
-                build_chat_model(settings, settings.planner_model)
-                if settings.planner_model and settings.planner_model != settings.llm_model
-                else self.qa_agent.model
+            planner_model = build_chat_model(
+                settings,
+                settings.planner_model or settings.llm_model,
+                thinking_enabled=True,
             )
         self.query_planner = QueryPlannerAgent(
             planner_model,
@@ -219,8 +219,6 @@ class QBRService:
     ) -> dict[str, Any]:
         return self.qa_service.add_feedback(message_id, workspace_id, user_id, rating, category, comment)
 
-    # Compatibility shims for the deterministic-policy unit tests. New callers
-    # should exercise these policies through QAApplicationService.
     def _answer(
         self,
         question: str,
@@ -231,24 +229,3 @@ class QBRService:
 
     def _table_reasoning_answer(self, question: str, sources: list[dict[str, Any]]) -> Any:
         return self.qa_service._table_reasoning_answer(question, sources)
-
-    def _constraint_abstention(
-        self,
-        question: str,
-        chunks: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]] | None:
-        return self.qa_service._constraint_abstention(question, chunks)
-
-    def _chart_comparison_answer(
-        self,
-        question: str,
-        chart_rows: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]] | None:
-        return self.qa_service._chart_comparison_answer(question, chart_rows)
-
-    def _chart_answer(
-        self,
-        question: str,
-        ranked: list[tuple[int, dict[str, Any]]],
-    ) -> tuple[str, list[dict[str, Any]], list[str]]:
-        return self.qa_service._chart_answer(question, ranked)

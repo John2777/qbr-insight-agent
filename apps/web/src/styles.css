@@ -58,11 +58,6 @@ a { color: inherit; text-decoration: none; }
 .answer-sections p { margin: 0; color: #344054; line-height: 1.7; }
 .answer-sections ul { display: grid; gap: 7px; margin: 0; padding-left: 20px; color: #344054; }
 .answer-sections li { padding-left: 2px; line-height: 1.65; }
-.answer-overview { padding: 15px 16px; border-left: 4px solid #78905a; border-radius: 8px; background: #f4f7f1; }
-.answer-overview h3 { margin: 0 0 6px; padding: 0; border: 0; }
-.legacy-answer { color: #697586; font-size: 12px; }
-.legacy-answer summary { cursor: pointer; font-weight: 700; }
-.legacy-answer > div { max-height: 220px; margin-top: 8px; padding: 12px; overflow: auto; white-space: pre-wrap; border-radius: 7px; background: #f6f7f9; }
 .inline-citation { display: inline; margin: 0 2px; padding: 1px 5px; color: #315274; background: #eaf0f6; border: 0; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: 800; vertical-align: .08em; }
 .answer-table-wrap, .native-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #e3e7ec; border-radius: 8px; }
 .answer-table, .native-table { width: 100%; border-collapse: collapse; background: white; font-size: 12px; }

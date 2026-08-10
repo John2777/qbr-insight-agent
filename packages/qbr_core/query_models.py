@@ -22,28 +22,37 @@ class RetrievalQuery:
 
 @dataclass(frozen=True, slots=True)
 class QueryPlan:
+    """A semantic task frame, not an intent-classification result.
+
+    The planner describes what the user is trying to accomplish and which
+    evidence would support it.  Downstream components consume those semantic
+    fields directly instead of branching on a closed set of intent labels.
+    """
+
     original_question: str
     canonical_question: str
-    intent: str
+    task_summary: str
+    answer_brief: str
     answer_language: str
     execution_profile: str
     document_ids: tuple[str, ...]
     retrieval_queries: tuple[RetrievalQuery, ...]
     hard_constraints: tuple[str, ...] = ()
-    required_facets: tuple[str, ...] = ()
+    evidence_requirements: tuple[str, ...] = ("directly relevant evidence",)
+    operations: tuple[str, ...] = ("answer from evidence",)
     allowed_content_roles: tuple[str, ...] = (
         "business_fact",
         "management_insight",
         "risk_signal",
         "table",
         "chart",
+        "provenance",
+        "methodology",
     )
-    excluded_content_roles: tuple[str, ...] = ("boilerplate", "methodology")
-    evaluation_polarity: str = "neutral"
-    secondary_intents: tuple[str, ...] = ()
-    operations: tuple[str, ...] = ("answer_from_evidence",)
-    intent_confidence: float = 1.0
-    planner: str = "deterministic"
+    excluded_content_roles: tuple[str, ...] = ("boilerplate",)
+    needs_visuals: bool = True
+    planner_confidence: float = 0.0
+    planner: str = "linguistic_fallback"
     warnings: tuple[str, ...] = ()
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
@@ -51,29 +60,20 @@ class QueryPlan:
         return {
             "original_question": self.original_question,
             "canonical_question": self.canonical_question,
-            "intent": self.intent,
+            "task_summary": self.task_summary,
+            "answer_brief": self.answer_brief,
             "answer_language": self.answer_language,
             "execution_profile": self.execution_profile,
             "document_ids": list(self.document_ids),
             "retrieval_queries": [item.to_dict() for item in self.retrieval_queries],
             "hard_constraints": list(self.hard_constraints),
-            "required_facets": list(self.required_facets),
+            "evidence_requirements": list(self.evidence_requirements),
+            "operations": list(self.operations),
             "allowed_content_roles": list(self.allowed_content_roles),
             "excluded_content_roles": list(self.excluded_content_roles),
-            "evaluation_polarity": self.evaluation_polarity,
-            "secondary_intents": list(self.secondary_intents),
-            "active_intents": list(self.active_intents),
-            "operations": list(self.operations),
-            "intent_confidence": self.intent_confidence,
+            "needs_visuals": self.needs_visuals,
+            "planner_confidence": self.planner_confidence,
             "planner": self.planner,
             "warnings": list(self.warnings),
             "diagnostics": self.diagnostics,
         }
-
-    @property
-    def active_intents(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys((self.intent, *self.secondary_intents)))
-
-    @property
-    def is_composite(self) -> bool:
-        return len(self.active_intents) > 1

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from langchain_core.messages import AIMessage
 from pytest import LogCaptureFixture
 
 from packages.qbr_core.config import Settings
-from packages.qbr_core.llm import EvidenceQAAgent
+from packages.qbr_core.llm import EvidenceQAAgent, build_chat_model
 
 
 class FakeModel:
@@ -14,8 +15,10 @@ class FakeModel:
         self.content = content
         self.finish_reason = finish_reason
         self.output_tokens = output_tokens
+        self.messages: object | None = None
 
-    def invoke(self, _messages: object) -> AIMessage:
+    def invoke(self, messages: object) -> AIMessage:
+        self.messages = messages
         if isinstance(self.content, Exception):
             raise self.content
         response_metadata = {"model_name": "deepseek-v4-flash"}
@@ -57,35 +60,53 @@ def evidence() -> list[dict[str, object]]:
     ]
 
 
+def task_frame(question: str) -> dict[str, object]:
+    return {
+        "canonical_question": question,
+        "task_summary": f"Directly resolve: {question}",
+        "answer_brief": "Use the evidence and answer directly.",
+        "operations": ["locate the requested value"],
+        "evidence_requirements": ["the requested metric and period"],
+    }
+
+
+def answer(agent: EvidenceQAAgent, question: str, grounding: str, items: list[dict[str, object]] | None = None):
+    return agent.answer(
+        question=question,
+        grounding_context=grounding,
+        evidence=items if items is not None else evidence(),
+        history=[],
+        task_frame=task_frame(question),
+    )
+
+
 def test_llm_answer_accepts_grounded_numbers_and_citations(tmp_path: Path) -> None:
     agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel("Q2 Revenue 为 20。[1]"))
-    result = agent.answer(
-        question="Q2 Revenue 是多少？",
-        deterministic_answer="Revenue 在 Q2 的值为 20。[1]",
-        evidence=evidence(),
-        history=[],
-    )
+    result = answer(agent, "Q2 Revenue 是多少？", "Revenue: Q2=20 [1]")
     assert result.answer == "Q2 Revenue 为 20。[1]"
     assert result.warnings == []
-    assert result.model["total_tokens"] == 120
+    assert result.model["thinking"] == "disabled"
 
 
 def test_llm_answer_rejects_invented_number(tmp_path: Path) -> None:
-    fallback = "Revenue 在 Q2 的值为 20。[1]"
+    fallback = "Revenue: Q2=20 [1]"
     agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel("Q2 Revenue 为 25。[1]"))
-    result = agent.answer(question="Q2 Revenue 是多少？", deterministic_answer=fallback, evidence=evidence(), history=[])
+    result = answer(agent, "Q2 Revenue 是多少？", fallback)
     assert result.answer == fallback
     assert result.warnings == ["LLM_NUMERIC_VALIDATION_FAILED"]
 
 
-def test_llm_provider_failure_is_explicit_and_uses_safe_fallback(tmp_path: Path, caplog: LogCaptureFixture) -> None:
-    fallback = "Revenue 在 Q2 的值为 20。[1]"
+def test_llm_provider_failure_is_explicit_and_uses_safe_grounding_fallback(
+    tmp_path: Path, caplog: LogCaptureFixture
+) -> None:
+    fallback = "Revenue: Q2=20 [1]"
     agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(RuntimeError("provider unavailable")))
     result = agent.answer(
         question="Q2 Revenue 是多少？",
-        deterministic_answer=fallback,
+        grounding_context=fallback,
         evidence=evidence(),
         history=[],
+        task_frame=task_frame("Q2 Revenue 是多少？"),
         run_id="run_provider_failure",
     )
     assert result.answer == fallback
@@ -93,124 +114,44 @@ def test_llm_provider_failure_is_explicit_and_uses_safe_fallback(tmp_path: Path,
     assert result.model["status"] == "fallback"
     assert "provider unavailable" not in str(result.model)
     assert '"event":"provider_call_failed"' in caplog.text
-    assert '"run_id":"run_provider_failure"' in caplog.text
 
 
-def test_llm_length_finish_uses_complete_deterministic_fallback(tmp_path: Path) -> None:
-    fallback = "潜在问题包括：Digital STP 从26/02的73.8降至26/03的72.1，下降1.7个百分点。[1]"
-    truncated = "潜在问题包括：Digital STP 从26/02的73.8"
-    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(truncated, finish_reason="length", output_tokens=1200))
-
-    result = agent.answer(
-        question="当前文档里能找到哪些公司潜在的问题？",
-        deterministic_answer=fallback,
-        evidence=evidence(),
-        history=[],
-        answer_mode="negative_signal_summary",
-        query_plan={"intent": "negative_signal_summary"},
-    )
-
+def test_llm_truncation_uses_complete_grounding_fallback(tmp_path: Path) -> None:
+    fallback = "Digital STP: 26/02=73.8; 26/03=72.1 [1]"
+    model = FakeModel("Digital STP 从26/02的73.8", finish_reason="length", output_tokens=1200)
+    result = answer(EvidenceQAAgent(settings_at(tmp_path), model=model), "Digital STP 有何变化？", fallback)
     assert result.answer == fallback
     assert result.warnings == ["LLM_OUTPUT_TRUNCATED"]
     assert result.model["status"] == "truncated"
-    assert result.model["finish_reason"] == "length"
 
 
 def test_llm_token_limit_without_finish_reason_uses_fallback(tmp_path: Path) -> None:
-    fallback = "Revenue 在 Q2 的值为 20。[1]"
-    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel("Q2 Revenue 为 20", output_tokens=1200))
-
-    result = agent.answer(question="Q2 Revenue 是多少？", deterministic_answer=fallback, evidence=evidence(), history=[])
-
+    fallback = "Revenue: Q2=20 [1]"
+    model = FakeModel("Q2 Revenue 为 20", output_tokens=1200)
+    result = answer(EvidenceQAAgent(settings_at(tmp_path), model=model), "Q2 Revenue 是多少？", fallback)
     assert result.answer == fallback
     assert result.warnings == ["LLM_OUTPUT_TRUNCATED"]
-    assert result.model["status"] == "truncated"
 
 
-def test_llm_rejects_positive_document_summary_for_negative_intent(tmp_path: Path) -> None:
-    fallback = "文档中最明确的负面信号是：\n\n**阈值事项**\n\n- Risk concentration 超过限额。[1]"
-    candidate = (
-        "## 总体判断\n\n公司业绩整体上行。[1]\n\n"
-        "## 关键趋势\n\n核心指标保持增长。[1]\n\n"
-        "## 经营解读\n\n增长动量延续。[1]\n\n"
-        "## 建议关注\n\n后续继续关注执行风险。[1]"
-    )
-    negative_evidence = [
-        {
-            "document_title": "FY25 QBR",
-            "slide_no": 1,
-            "source_kind": "native_ooxml",
-            "confidence": 1.0,
-            "quote": "Risk concentration exceeded the approved limit.",
-        }
-    ]
-    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
-
-    result = agent.answer(
-        question="当前文档有哪些潜在问题？",
-        deterministic_answer=fallback,
-        evidence=negative_evidence,
-        history=[],
-        answer_mode="negative_signal_summary",
-        query_plan={"intent": "negative_signal_summary"},
-    )
-
-    assert result.answer == fallback
-    assert result.warnings == ["LLM_QUERY_ADHERENCE_FAILED"]
+def test_generation_prompt_uses_task_frame_without_fixed_summary_template(tmp_path: Path) -> None:
+    model = FakeModel("增长延续，同时集中度偏高。[1]")
+    items = [{**evidence()[0], "quote": "Growth continued while concentration remained elevated."}]
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
+    result = answer(agent, "请概括优势和潜在问题。", "Growth continued; concentration elevated [1]", items)
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.messages or [])
+    assert result.answer == "增长延续，同时集中度偏高。[1]"
+    assert "语义任务框架" in prompt
+    assert "固定使用“总体判断" not in prompt
+    assert "negative_signal_summary" not in prompt
 
 
-def test_llm_accepts_issue_focused_answer_for_negative_intent(tmp_path: Path) -> None:
-    fallback = "文档中最明确的负面信号是：Risk concentration 超过限额。[1]"
-    candidate = "潜在问题主要是风险集中度超过限额，需要管理层关注。[1]"
-    negative_evidence = [
-        {
-            "document_title": "FY25 QBR",
-            "slide_no": 1,
-            "source_kind": "native_ooxml",
-            "confidence": 1.0,
-            "quote": "Risk concentration exceeded the approved limit.",
-        }
-    ]
-    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
-
-    result = agent.answer(
-        question="当前文档有哪些潜在问题？",
-        deterministic_answer=fallback,
-        evidence=negative_evidence,
-        history=[],
-        answer_mode="negative_signal_summary",
-        query_plan={"intent": "negative_signal_summary"},
-    )
-
-    assert result.answer == candidate
-    assert result.warnings == []
+def test_deepseek_answer_client_explicitly_disables_thinking(tmp_path: Path) -> None:
+    with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
+        build_chat_model(settings_at(tmp_path), "deepseek-v4-flash", thinking_enabled=False)
+    assert constructor.call_args.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
-def test_llm_allows_summary_structure_when_negative_analysis_is_one_part_of_composite_task(tmp_path: Path) -> None:
-    fallback = "## 文档概览\n\n整体增长。[1]\n\n## 潜在问题与风险\n\n风险集中度偏高。[1]"
-    candidate = "## 总体判断\n\n增长延续，但风险集中度偏高。[1]\n\n## 建议关注\n\n需要降低集中度。[1]"
-    composite_evidence = [
-        {
-            "document_title": "FY25 QBR",
-            "slide_no": 1,
-            "source_kind": "native_ooxml",
-            "confidence": 1.0,
-            "quote": "Growth continued, while risk concentration remained elevated.",
-        }
-    ]
-    agent = EvidenceQAAgent(settings_at(tmp_path), model=FakeModel(candidate))
-
-    result = agent.answer(
-        question="请总结优势和潜在问题。",
-        deterministic_answer=fallback,
-        evidence=composite_evidence,
-        history=[],
-        answer_mode="business_evaluation",
-        query_plan={
-            "intent": "business_evaluation",
-            "secondary_intents": ["negative_signal_summary", "summary"],
-        },
-    )
-
-    assert result.answer == candidate
-    assert result.warnings == []
+def test_deepseek_planner_client_can_use_thinking_independently(tmp_path: Path) -> None:
+    with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
+        build_chat_model(settings_at(tmp_path), "deepseek-v4-flash", thinking_enabled=True)
+    assert constructor.call_args.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}

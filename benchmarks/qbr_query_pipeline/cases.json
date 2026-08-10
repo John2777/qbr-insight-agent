@@ -1,414 +1,132 @@
 {
-  "dataset": "qbr-query-pipeline",
-  "version": "2.0.0",
-  "description": "Bilingual TaskFrame, primary/secondary intent, operation, query-expansion, constraint and content-policy regression cases for QBR planning.",
+  "dataset": "qbr-semantic-task-frame",
+  "version": "3.0.0",
+  "description": "Bilingual semantic task-frame, multi-goal coverage, query expansion and hard-constraint regression cases. No intent taxonomy is evaluated.",
   "cases": [
     {
-      "id": "plan-001",
-      "question": "what is the bad news in this ppt",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "en",
-      "required_query_terms": ["risk concentration", "风险"],
-      "excluded_roles": ["provenance", "methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-002",
-      "question": "这份PPT的主要风险是什么？",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "zh",
-      "required_query_terms": ["risk concentration", "风险"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-003",
-      "question": "What are the risks in this deck?",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "en",
-      "required_query_terms": ["below target", "挑战"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-004",
-      "question": "哪些指标承压，管理层应该关注什么？",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "zh",
-      "required_query_terms": ["warning threshold", "承压"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-005",
-      "question": "What should management worry about in the presentation?",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "en",
-      "required_query_terms": ["management concern", "风险"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-006",
+      "id": "task-001",
       "question": "Summarize the key takeaways from this QBR.",
-      "expected_intent": "summary",
-      "expected_language": "en",
-      "required_query_terms": ["executive summary", "执行摘要"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
+      "expected_task_terms": [["summarize", "key takeaways"]],
+      "required_query_terms": ["executive summary", "performance"]
     },
     {
-      "id": "plan-007",
-      "question": "请概括这份季度业务回顾的核心结论。",
-      "expected_intent": "summary",
-      "expected_language": "zh",
-      "required_query_terms": ["key takeaways", "核心结论"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
+      "id": "task-002",
+      "question": "请总结当前PPT的核心结论。",
+      "expected_task_terms": [["总结", "核心结论"]],
+      "required_query_terms": ["执行摘要", "核心事实"]
     },
     {
-      "id": "plan-008",
-      "question": "Which data sources are official and which are synthetic?",
-      "expected_intent": "provenance",
-      "expected_language": "en",
-      "required_query_terms": ["official sources", "公开披露"],
-      "excluded_roles": ["boilerplate"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-009",
-      "question": "哪些数据是公开披露，哪些是模拟数据？",
-      "expected_intent": "provenance",
-      "expected_language": "zh",
-      "required_query_terms": ["synthetic illustrative", "数据来源"],
-      "excluded_roles": ["boilerplate"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-010",
-      "question": "Show the monthly sales trend.",
-      "expected_intent": "chart_analysis",
-      "expected_language": "en",
-      "required_query_terms": ["revenue sales"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-011",
-      "question": "月度销售走势如何？",
-      "expected_intent": "chart_analysis",
-      "expected_language": "zh",
-      "required_query_terms": ["月度销售走势"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-012",
-      "question": "请分析风险阈值表中超过限额的项目。",
-      "expected_intent": "table_analysis",
-      "expected_language": "zh",
-      "required_query_terms": ["风险阈值表中超过限额的项目"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-013",
-      "question": "Rank the markets in the operating matrix.",
-      "expected_intent": "table_analysis",
-      "expected_language": "en",
-      "required_query_terms": ["operating matrix"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-014",
-      "question": "VONB是什么含义，解释一下。",
-      "expected_intent": "term_definition",
-      "expected_language": "zh",
-      "required_query_terms": ["value of new business", "新业务价值"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-015",
-      "question": "What does CER mean in a QBR?",
-      "expected_intent": "term_definition",
-      "expected_language": "en",
-      "required_query_terms": ["constant exchange rates", "固定汇率"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-016",
-      "question": "How did sales perform in Q2 2025?",
-      "expected_intent": "evidence_answer",
-      "expected_language": "en",
-      "required_query_terms": ["revenue sales", "q2", "2025"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": ["2025", "Q2"]
-    },
-    {
-      "id": "plan-017",
-      "question": "2025年第二季度利润增长多少？",
-      "expected_intent": "evidence_answer",
-      "expected_language": "zh",
-      "required_query_terms": ["profit earnings", "2025年"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": ["2025年", "第二季度"]
-    },
-    {
-      "id": "plan-018",
-      "question": "资本配置和预算偏差有多大？",
-      "expected_intent": "evidence_answer",
-      "expected_language": "zh",
-      "required_query_terms": ["capital solvency", "target budget"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-019",
-      "question": "What are the key challenges overall?",
-      "expected_intent": "negative_signal_summary",
-      "expected_language": "en",
-      "required_query_terms": ["deteriorating trend", "挑战"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-020",
-      "question": "What is the source and synthetic-data boundary?",
-      "expected_intent": "provenance",
-      "expected_language": "en",
-      "required_query_terms": ["official sources", "口径 边界"],
-      "excluded_roles": ["boilerplate"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-021",
-      "question": "Compare the Q1 and Q2 trend in the chart.",
-      "expected_intent": "chart_analysis",
-      "expected_language": "en",
-      "required_query_terms": ["q1", "q2"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": ["Q1", "Q2"]
-    },
-    {
-      "id": "plan-022",
-      "question": "阈值矩阵里哪项最低？",
-      "expected_intent": "table_analysis",
-      "expected_language": "zh",
-      "required_query_terms": ["阈值矩阵里哪项最低"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-023",
-      "question": "13M Persistency是什么意思？",
-      "expected_intent": "term_definition",
-      "expected_language": "zh",
-      "required_query_terms": ["13-month persistency", "13个月继续率"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-024",
-      "question": "Did customer retention improve in FY2025?",
-      "expected_intent": "evidence_answer",
-      "expected_language": "en",
-      "required_query_terms": ["customer retention persistency", "fy2025"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": ["FY2025"]
-    },
-    {
-      "id": "plan-025",
-      "question": "公司的优势在哪些点上？",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "positive",
-      "expected_language": "zh",
-      "required_query_terms": ["strength advantage", "增长 价值 盈利", "继续率", "portfolio"],
-      "excluded_roles": ["provenance", "methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-026",
-      "question": "What are the company's main strengths?",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "positive",
-      "expected_language": "en",
-      "required_query_terms": ["优势 亮点", "capital buffer", "persistency productivity"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-027",
-      "question": "What went well in this QBR?",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "positive",
-      "expected_language": "en",
-      "required_query_terms": ["record high momentum", "增长 动量 延续"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-028",
-      "question": "公司的优劣势分别是什么？",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "balanced",
-      "expected_language": "zh",
-      "required_query_terms": ["strength advantage", "绿色 达标"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-029",
-      "question": "下一阶段有哪些增长机会？",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "opportunity",
-      "expected_language": "zh",
-      "required_query_terms": ["competitive edge", "运营质量"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-030",
-      "question": "What are the company's weaknesses?",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "en",
-      "required_query_terms": ["deteriorating trend", "management concern"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-031",
-      "question": "公司的核心竞争力体现在哪里？",
-      "expected_intent": "business_evaluation",
-      "expected_evaluation_polarity": "positive",
-      "expected_language": "zh",
-      "required_query_terms": ["outperformance leading", "自由盈余", "diversified mix"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-032",
-      "question": "所谓的执行风险具体是指什么？",
-      "expected_intent": "risk_explanation",
-      "expected_language": "zh",
-      "required_query_terms": ["execution risk", "风险闸门", "优先事项"],
-      "excluded_roles": ["provenance", "methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-033",
-      "question": "当前文档里能找到哪些公司潜在的问题？",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "zh",
-      "required_query_terms": ["risk concentration", "管理关注点"],
-      "excluded_roles": ["provenance", "methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-034",
-      "question": "这家公司可能存在哪些经营隐患？",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "zh",
-      "required_query_terms": ["deteriorating trend", "风险"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-035",
-      "question": "哪些方面看起来需要警惕？",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "zh",
-      "required_query_terms": ["warning threshold", "挑战"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-036",
-      "question": "Where are the weak spots in this business?",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "en",
-      "required_query_terms": ["risk concentration", "管理关注点"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-037",
-      "question": "What potential issues should management investigate in this deck?",
-      "expected_intent": "negative_signal_summary",
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "en",
-      "required_query_terms": ["management concern", "风险"],
-      "excluded_roles": ["provenance", "methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-038",
-      "question": "当前文档有哪些核心增长指标？",
-      "expected_intent": "evidence_answer",
-      "expected_language": "zh",
-      "required_query_terms": ["growth increase"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-039",
-      "question": "请总结当前文档的核心指标。",
-      "expected_intent": "summary",
-      "expected_language": "zh",
-      "required_query_terms": ["executive summary", "执行摘要"],
-      "excluded_roles": ["methodology"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-040",
-      "question": "公司计划如何解决这些问题？",
-      "expected_intent": "evidence_answer",
-      "expected_language": "zh",
-      "required_query_terms": ["公司计划如何解决这些问题"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-041",
-      "question": "VONB是什么含义，并分析图中的趋势？",
-      "expected_intent": "term_definition",
-      "expected_secondary_intents": ["chart_analysis"],
-      "required_operations": ["define_term", "analyze_chart"],
-      "expected_language": "zh",
-      "required_query_terms": ["value of new business", "趋势"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
-    },
-    {
-      "id": "plan-042",
+      "id": "task-003",
       "question": "请总结公司的优势和潜在问题。",
-      "expected_intent": "business_evaluation",
-      "expected_secondary_intents": ["negative_signal_summary", "summary"],
-      "required_operations": ["evaluate_business", "assess_downside", "synthesize_summary"],
-      "expected_evaluation_polarity": "balanced",
-      "expected_language": "zh",
-      "required_query_terms": ["strength advantage", "risk concentration"],
-      "excluded_roles": ["provenance"],
-      "hard_constraints": []
+      "expected_task_terms": [["优势"], ["潜在问题"]],
+      "required_query_terms": ["优势", "风险"]
     },
     {
-      "id": "plan-043",
-      "question": "哪些数据是公开披露或模拟数据，同时有什么主要风险？",
-      "expected_intent": "negative_signal_summary",
-      "expected_secondary_intents": ["provenance"],
-      "required_operations": ["assess_downside", "verify_provenance"],
-      "expected_evaluation_polarity": "negative",
-      "expected_language": "zh",
-      "required_query_terms": ["management concern", "official sources"],
-      "excluded_roles": ["boilerplate"],
-      "hard_constraints": []
+      "id": "task-004",
+      "question": "What potential issues should management investigate?",
+      "expected_task_terms": [["potential issues"]],
+      "required_query_terms": ["risk", "threshold"]
+    },
+    {
+      "id": "task-005",
+      "question": "当前文档里有哪些经营隐患？",
+      "expected_task_terms": [["经营隐患"]],
+      "required_query_terms": ["风险", "承压"]
+    },
+    {
+      "id": "task-006",
+      "question": "How did sales perform in Q2 2025?",
+      "expected_task_terms": [["sales"], ["Q2 2025"]],
+      "required_query_terms": ["revenue", "performance"],
+      "hard_constraints": ["Q2", "2025"]
+    },
+    {
+      "id": "task-007",
+      "question": "2026年第一季度香港VONB是多少？",
+      "expected_task_terms": [["VONB"], ["香港"]],
+      "required_query_terms": ["VONB", "新业务价值"],
+      "hard_constraints": ["2026年", "第一季度"]
+    },
+    {
+      "id": "task-008",
+      "question": "VONB是什么含义？",
+      "expected_task_terms": [["VONB"], ["含义"]],
+      "required_query_terms": ["VONB", "新业务价值"]
+    },
+    {
+      "id": "task-009",
+      "question": "VONB是什么含义，并分析图中的趋势？",
+      "expected_task_terms": [["含义"], ["趋势"]],
+      "required_query_terms": ["VONB", "trend"]
+    },
+    {
+      "id": "task-010",
+      "question": "Revenue 从 Q1 到 Q3 增长多少？",
+      "expected_task_terms": [["Revenue"], ["增长多少"]],
+      "required_query_terms": ["Revenue", "change"],
+      "hard_constraints": ["Q1", "Q3"]
+    },
+    {
+      "id": "task-011",
+      "question": "Which region has the highest margin in 2025?",
+      "expected_task_terms": [["highest margin"]],
+      "required_query_terms": ["margin", "region"],
+      "hard_constraints": ["2025"]
+    },
+    {
+      "id": "task-012",
+      "question": "所谓的执行风险具体是指什么？",
+      "expected_task_terms": [["执行风险"], ["指什么"]],
+      "required_query_terms": ["风险", "定义"]
+    },
+    {
+      "id": "task-013",
+      "question": "公司的优势在哪些点上？",
+      "expected_task_terms": [["优势"]],
+      "required_query_terms": ["strength", "growth"]
+    },
+    {
+      "id": "task-014",
+      "question": "公司的优劣势分别是什么？",
+      "expected_task_terms": [["优势"], ["劣势"]],
+      "required_query_terms": ["strength", "risk"]
+    },
+    {
+      "id": "task-015",
+      "question": "下一阶段有哪些增长机会？",
+      "expected_task_terms": [["增长机会"]],
+      "required_query_terms": ["growth", "opportunity"]
+    },
+    {
+      "id": "task-016",
+      "question": "哪些数据是公开披露，哪些是模拟数据？",
+      "expected_task_terms": [["公开披露"], ["模拟数据"]],
+      "required_query_terms": ["official disclosure", "synthetic"]
+    },
+    {
+      "id": "task-017",
+      "question": "请总结文档并说明每个结论的数据来源。",
+      "expected_task_terms": [["总结"], ["数据来源"]],
+      "required_query_terms": ["summary", "source"]
+    },
+    {
+      "id": "task-018",
+      "question": "比较香港和中国内地在26/03的表现。",
+      "expected_task_terms": [["比较"], ["香港"], ["中国内地"]],
+      "required_query_terms": ["comparison", "26/03"]
+    },
+    {
+      "id": "task-019",
+      "question": "2025年资本比率是否达到阈值？",
+      "expected_task_terms": [["资本比率"], ["阈值"]],
+      "required_query_terms": ["capital", "threshold"],
+      "hard_constraints": ["2025年"]
+    },
+    {
+      "id": "task-020",
+      "question": "这份PPT表现如何，下一季度应关注什么？",
+      "expected_task_terms": [["表现如何"], ["下一季度"]],
+      "required_query_terms": ["performance", "actions"]
     }
   ]
 }

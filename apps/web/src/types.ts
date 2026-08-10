@@ -89,9 +89,9 @@ export type Message = {
   status: string;
   citations: Citation[];
   metadata?: {
-    answer_mode?: string;
     show_visuals?: boolean;
     knowledge_source?: string;
+    pipeline_version?: string;
   };
 };
 

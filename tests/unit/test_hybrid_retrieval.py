@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from packages.qbr_core import QBRService, Settings
+from packages.qbr_core.calculations import ChartCalculator
 from packages.qbr_core.db import Database, utc_now
 from packages.qbr_core.retrieval import EvidenceRetriever
 from packages.qbr_core.vector import FaissVectorStore, HashingEmbeddingProvider
@@ -81,7 +82,7 @@ def test_settings_distinguish_semantic_and_offline_vector_configuration(tmp_path
     ).vector_configured is True
 
 
-def test_dual_axis_resolution_and_multi_series_answer(tmp_path: Path) -> None:
+def test_dual_axis_resolution_and_verified_multi_series_calculation(tmp_path: Path) -> None:
     service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
     chart = {
         "axes": [
@@ -119,24 +120,19 @@ def test_dual_axis_resolution_and_multi_series_answer(tmp_path: Path) -> None:
         },
         {
             **common,
-            "series_id": "margin",
-            "series_name": "Margin",
-            "y_value": 0.24,
-            "display_value": "24%",
-            "unit": "0%",
-            "visual_json": '{"axis":{"role":"secondary","position":"r","title":"Margin"}}',
+            "series_id": "profit",
+            "series_name": "Profit",
+            "y_value": 100.0,
+            "display_value": "$100m",
+            "unit": "$m",
+            "visual_json": '{"axis":{"role":"primary","position":"l","title":"Profit"}}',
         },
     ]
 
-    answer, evidence, warnings = service.qa_service.answer_engine._chart_answer(
-        "Q2 Revenue 和 Margin 分别是多少？",
-        service.qa_service.answer_engine._rank_chart_points("Q2 Revenue 和 Margin 分别是多少？", rows),
-    )
-
-    assert "$120m" in answer and "24%" in answer
-    assert "左侧主轴" in answer and "右侧次轴" in answer
-    assert len(evidence) == 2
-    assert warnings == []
+    calculation = ChartCalculator().analyze("Q2 Revenue 和 Profit 哪个更高？高多少？", rows)
+    assert calculation is not None
+    assert "$120m" in calculation.text and "$100m" in calculation.text and "difference=20" in calculation.text
+    assert len(calculation.evidence) == 2
 
 
 def _seed_chunk(

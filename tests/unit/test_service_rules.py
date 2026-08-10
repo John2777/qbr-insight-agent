@@ -55,8 +55,8 @@ def test_growth_answer_is_replayable(tmp_path: Path, synthetic_pptx: Path) -> No
     sent = service.ask(conversation["id"], "Revenue 从 Q1 到 Q3 增长多少？", "ws_demo", "user_demo")
     assert service.process_next_run() == sent["run_id"]
     run = service.get_run(sent["run_id"], "ws_demo")
-    assert "200.0%" in run["message"]["content"]
-    assert [citation["quote"].split(":")[-1].strip() for citation in run["citations"]] == ["Q1=10.0", "Q3=30.0"]
+    assert "relative change=200.0%" in run["message"]["content"]
+    assert [citation["quote"].split(":")[-1].strip() for citation in run["citations"][:2]] == ["Q1=10", "Q3=30"]
 
 
 def test_broad_performance_question_summarizes_current_qbr(tmp_path: Path, synthetic_pptx: Path) -> None:
@@ -77,10 +77,10 @@ def test_broad_performance_question_summarizes_current_qbr(tmp_path: Path, synth
     assert service.process_next_run() == sent["run_id"]
     run = service.get_run(sent["run_id"], "ws_demo")
 
-    assert "没有足够证据" not in run["message"]["content"]
-    assert "## 总体判断" in run["message"]["content"]
-    assert "## 关键趋势" in run["message"]["content"]
+    assert "没有检索到" not in run["message"]["content"]
     assert "Revenue" in run["message"]["content"]
+    assert "文档中的核心图表指标" not in run["message"]["content"]
+    assert "## 总体判断" not in run["message"]["content"]
     assert run["citations"]
     assert "INSUFFICIENT_EVIDENCE" not in run["warnings"]
 

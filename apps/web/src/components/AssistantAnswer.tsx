@@ -88,13 +88,6 @@ function StructuredText({ content, citations, onCitation }: {
   citations: Citation[];
   onCitation: (citation: Citation) => void;
 }) {
-  const legacy = content.startsWith("从整份文档看，业绩概况可依据以下关键内容归纳：");
-  if (legacy) {
-    return <div className="answer-sections">
-      <section className="answer-overview"><h3>总体判断</h3><p>已综合执行摘要、财务数据和经营指标。关键数值与趋势已整理为下方表格和图表。</p></section>
-      <details className="legacy-answer"><summary>查看原始证据摘录</summary><div>{content}</div></details>
-    </div>;
-  }
   return <div className="answer-sections">{parseAnswer(content).map((block, index) => {
     if (block.kind === "heading") return <h3 key={index}>{block.text}</h3>;
     if (block.kind === "paragraph") return <p key={index}><InlineText text={block.text} citations={citations} onCitation={onCitation}/></p>;

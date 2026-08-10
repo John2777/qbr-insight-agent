@@ -12,7 +12,6 @@
     "allowed_evidence": [],
     "citation_policy": "optional",
     "max_citations": 0,
-    "expected_answer_mode": "term_definition",
     "forbidden_groups": [["根据文档中检索到的直接证据"], ["市场 |"], ["香港 |"]]
   },
   "cases": [

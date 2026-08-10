@@ -230,31 +230,14 @@ def _sentence_units(content: str) -> list[str]:
     return expanded
 
 
-def _negative_table_signal(row: str, terms: set[str]) -> float:
-    folded = row.casefold()
-    score = sum(1.0 for term in terms if term in folded)
-    if "↑" in row or re.search(r"\b(?:red|amber|warning|breach)\b", folded):
-        score += 4.0
-    if any(marker in folded for marker in ("红色", "黄色", "预警", "超限", "恶化", "承压", "未达")):
-        score += 4.0
-    percentages = [float(value) for value in re.findall(r"(\d+(?:\.\d+)?)%", row)]
-    if percentages and max(percentages) >= 75:
-        score += 1.5
-    return score
-
-
 def _extract_table(content: str, terms: set[str], plan: QueryPlan) -> str:
     rows = [line.strip() for line in content.splitlines() if line.strip()]
     if not rows:
         return content.strip()
     header = rows[0]
     body = rows[1:]
-    if any(intent in {"negative_signal_summary", "risk_explanation"} for intent in plan.active_intents):
-        ranked = sorted(enumerate(body), key=lambda item: (-_negative_table_signal(item[1], terms), item[0]))
-        selected_indexes = sorted(index for index, row in ranked[:4] if _negative_table_signal(row, terms) > 0)
-    else:
-        ranked = sorted(enumerate(body), key=lambda item: (-_unit_score(item[1], terms), item[0]))
-        selected_indexes = sorted(index for index, row in ranked[:4] if _unit_score(row, terms) > 0)
+    ranked = sorted(enumerate(body), key=lambda item: (-_unit_score(item[1], terms), item[0]))
+    selected_indexes = sorted(index for index, row in ranked[:4] if _unit_score(row, terms) > 0)
     if not selected_indexes:
         selected_indexes = list(range(min(3, len(body))))
     selected = [header, *(body[index] for index in selected_indexes)]
@@ -284,47 +267,25 @@ def extract_relevant_quote(content: str, plan: QueryPlan, *, chunk_type: str = "
 
 
 def infer_facet(content: str, plan: QueryPlan) -> str:
-    folded = content.casefold()
-    active_intents = set(plan.active_intents)
-    if active_intents & {"negative_signal_summary", "risk_explanation"}:
-        if any(marker in folded for marker in ("threshold", "limit", "warning", "breach", "阈值", "限额", "红色", "黄色", "预警")):
-            return "threshold_pressure"
-        if any(marker in folded for marker in MANAGEMENT_MARKERS):
-            return "management_concerns"
-        if any(marker in folded for marker in ("concentration", "exposure", "集中", "暴露")):
-            return "risk_concentration"
-        if any(marker in folded for marker in ("decline", "drop", "below", "deteriorat", "下降", "下滑", "恶化", "低于", "未达", "承压")):
-            return "deteriorating_metrics"
-        if any(marker in folded for marker in RISK_MARKERS):
-            return "explicit_negative_statements"
-    if "business_evaluation" in active_intents:
-        if any(marker in folded for marker in ("cash", "capital", "fsg", "solvency", "现金", "资本", "自由盈余", "偿付")):
-            return "cash_capital"
-        if any(
-            marker in folded
-            for marker in ("persistency", "productivity", "retention", "stp", "quality", "继续率", "产能", "留存", "直通率", "质量")
-        ):
-            return "operating_quality"
-        if any(
-            marker in folded for marker in ("mix", "concentration", "diversif", "portfolio", "regional", "组合", "集中", "多元", "区域")
-        ):
-            return "portfolio_resilience"
-        if any(
-            marker in folded
-            for marker in ("target", "threshold", "priority", "execution", "green", "目标", "阈值", "优先", "执行", "绿色", "达标")
-        ):
-            return "execution_delivery"
-        if any(
-            marker in folded
-            for marker in ("profit", "earnings", "margin", "roe", "roev", "value", "vonb", "利润", "盈利", "回报", "价值", "价值率")
-        ):
-            return "profitability_value"
-        if any(marker in folded for marker in ("growth", "increase", "momentum", "record", "增长", "提升", "动量", "新高", "创纪录")):
-            return "growth_momentum"
-        return ""
-    if not active_intents & {"negative_signal_summary", "risk_explanation"}:
-        return plan.required_facets[0] if plan.required_facets else "direct_answer"
-    return ""
+    def semantic_tokens(text: str) -> set[str]:
+        folded = text.casefold()
+        tokens = set(re.findall(r"[a-z0-9%_-]{2,}", folded))
+        for phrase in re.findall(r"[\u4e00-\u9fff]{2,}", folded):
+            if len(phrase) <= 4:
+                tokens.add(phrase)
+            tokens.update(phrase[index : index + 2] for index in range(len(phrase) - 1))
+        return tokens
+
+    content_terms = semantic_tokens(content)
+    best_requirement = ""
+    best_score = 0
+    for requirement in plan.evidence_requirements:
+        requirement_terms = semantic_tokens(requirement)
+        score = len(content_terms & requirement_terms)
+        if score > best_score:
+            best_requirement = requirement
+            best_score = score
+    return best_requirement or "directly relevant evidence"
 
 
 def _is_heading_like_negative(content: str) -> bool:
@@ -338,58 +299,6 @@ def _is_heading_like_negative(content: str) -> bool:
         return True
     token_count = len(re.findall(r"[A-Za-z0-9%]+|[\u4e00-\u9fff]{2,}", compact))
     return len(compact) <= 90 and token_count <= 6 and not has_predicate
-
-
-def _is_uninterpreted_negative_chart(content: str) -> bool:
-    folded = content.casefold()
-    has_predicate = any(marker in folded for marker in NEGATIVE_PREDICATE_MARKERS)
-    has_status = bool(re.search(r"\b(?:threshold|limit|target|red|amber)\b", folded)) or any(
-        marker in folded for marker in ("阈值", "限额", "目标", "红色", "黄色", "红灯", "黄灯")
-    )
-    return not has_predicate and not has_status
-
-
-def _comparison_matches(value: float, expression: str) -> bool | None:
-    match = re.search(r"(>=|<=|>|<|≥|≤)\s*(-?\d+(?:\.\d+)?)", expression.replace(",", ""))
-    if match is None:
-        return None
-    operator, raw_threshold = match.groups()
-    threshold = float(raw_threshold)
-    return {
-        ">": value > threshold,
-        ">=": value >= threshold,
-        "≥": value >= threshold,
-        "<": value < threshold,
-        "<=": value <= threshold,
-        "≤": value <= threshold,
-    }[operator]
-
-
-def _all_current_values_green(content: str) -> bool:
-    """Recognize native QBR traffic-light tables and suppress all-green rows as bad news."""
-    rows = [[cell.strip() for cell in line.split("|")] for line in content.splitlines() if "|" in line]
-    if len(rows) < 2:
-        return False
-    header = [cell.casefold() for cell in rows[0]]
-
-    def column(markers: tuple[str, ...]) -> int | None:
-        return next((index for index, cell in enumerate(header) if any(marker in cell for marker in markers)), None)
-
-    green_index = column(("green", "绿"))
-    current_index = column(("current", "actual", "当前", "实际"))
-    if green_index is None or current_index is None:
-        return False
-    evaluated: list[bool] = []
-    for row in rows[1:]:
-        if max(green_index, current_index) >= len(row):
-            continue
-        current_match = re.search(r"-?\d+(?:\.\d+)?", row[current_index].replace(",", ""))
-        if current_match is None:
-            continue
-        result = _comparison_matches(float(current_match.group(0)), row[green_index])
-        if result is not None:
-            evaluated.append(result)
-    return bool(evaluated) and all(evaluated)
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,23 +343,21 @@ class EvidencePack:
     def evidence(self) -> list[dict[str, Any]]:
         return [atom.to_evidence() for atom in self.atoms]
 
-    def render_fallback(self, plan: QueryPlan) -> str:
+    def render_grounding_context(self, plan: QueryPlan) -> str:
         if not self.atoms:
             return (
-                "当前文档范围内没有足够的相关业务证据回答这个问题。"
+                "没有检索到可用于回答的文档证据。"
                 if plan.answer_language == "zh"
-                else "The current document does not contain enough relevant business evidence to answer this question."
+                else "No document evidence was retrieved for this answer."
             )
-        if plan.intent == "negative_signal_summary" and not plan.is_composite:
-            heading = (
-                "文档中最明确的负面信号或管理层关注事项是："
-                if plan.answer_language == "zh"
-                else "The clearest negative signals or management concerns in the document are:"
-            )
-        else:
-            heading = "与问题直接相关的文档证据如下：" if plan.answer_language == "zh" else "The directly relevant document evidence is:"
+        heading = "已检索的编号证据：" if plan.answer_language == "zh" else "Retrieved numbered evidence:"
         lines = [f"- {atom.quote} [{index}]" for index, atom in enumerate(self.atoms, 1)]
         return heading + "\n\n" + "\n".join(lines)
+
+    # Kept as a narrow compatibility alias for callers that expect a model-free
+    # evidence replay. It contains no inferred business conclusion.
+    def render_fallback(self, plan: QueryPlan) -> str:
+        return self.render_grounding_context(plan)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -492,31 +399,20 @@ class EvidencePackBuilder:
             ):
                 rejected_quality["visual_numeric"] = rejected_quality.get("visual_numeric", 0) + 1
                 continue
-            exclusive_negative = set(plan.active_intents) <= {"negative_signal_summary", "risk_explanation"}
-            if exclusive_negative:
-                if _is_heading_like_negative(content):
-                    rejected_quality["heading_like"] = rejected_quality.get("heading_like", 0) + 1
-                    continue
-                chunk_type = str(row.get("chunk_type") or "").casefold()
-                if chunk_type.startswith("chart") and _is_uninterpreted_negative_chart(content):
-                    rejected_quality["uninterpreted_chart"] = rejected_quality.get("uninterpreted_chart", 0) + 1
-                    continue
-                if chunk_type == "table" and _all_current_values_green(content):
-                    rejected_quality["all_green_status_table"] = rejected_quality.get("all_green_status_table", 0) + 1
-                    continue
             facet = infer_facet(content, plan)
-            if (
-                not plan.is_composite
-                and plan.intent in {"business_evaluation", "negative_signal_summary", "risk_explanation"}
-                and not facet
-            ):
-                continue
             quote = extract_relevant_quote(content, plan, chunk_type=str(row.get("chunk_type") or "text"))
             if not quote:
                 continue
+            semantic_score = _unit_score(quote, _terms(plan))
+            if role in {"provenance", "methodology"} and semantic_score <= 0:
+                rejected_quality["off_task_context"] = rejected_quality.get("off_task_context", 0) + 1
+                continue
+            if role == "risk_signal" and _is_heading_like_negative(content) and semantic_score <= 0:
+                rejected_quality["heading_like"] = rejected_quality.get("heading_like", 0) + 1
+                continue
             score = float(row.get("task_score") or row.get("retrieval_score") or 0.0)
-            score += 2.0 if role in {"risk_signal", "management_insight"} else 1.0 if role in {"table", "chart"} else 0.0
-            score += _unit_score(quote, _terms(plan))
+            score += 1.0 if role in {"risk_signal", "management_insight", "table", "chart"} else 0.0
+            score += semantic_score
             ranked.append((score, row, role, facet or "direct_answer", quote))
         ranked.sort(key=lambda item: (-item[0], int(item[1].get("slide_no") or 0), str(item[1].get("id") or "")))
 
@@ -543,7 +439,7 @@ class EvidencePackBuilder:
                 break
 
         covered = tuple(dict.fromkeys(atom.facet for atom in atoms if atom.facet))
-        missing = tuple(facet for facet in plan.required_facets if facet not in covered)
+        missing = tuple(requirement for requirement in plan.evidence_requirements if requirement not in covered)
         minimum_atoms = 2 if plan.execution_profile == "deep" else 1
         answerable = len(atoms) >= minimum_atoms
         return EvidencePack(

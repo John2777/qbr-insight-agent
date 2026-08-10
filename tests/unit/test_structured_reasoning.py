@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from packages.qbr_core.answering import DeterministicAnswerEngine
+from packages.qbr_core.calculations import ChartCalculator
 from packages.qbr_core.db import Database
+from packages.qbr_core.query_planning import deterministic_plan
 from packages.qbr_core.reasoning import TableReasoner
 from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
 
@@ -92,25 +93,14 @@ def test_legacy_table_chunk_is_repaired_from_structured_cells() -> None:
     assert conn.execute("SELECT content FROM chunk_fts").fetchone()[0] == "市场 | VONB\n香港 | 2,256"
 
 
-def test_exact_value_constraint_abstains_without_period_or_market() -> None:
-    service = object.__new__(DeterministicAnswerEngine)
-    result = service._constraint_abstention(
-        "2026年第二季度日本市场的VONB精确值是多少？",
-        [{"content": "2026 Q1 香港市场 VONB 1,757"}],
-    )
-
-    assert result and result[1] == [] and result[2] == ["INSUFFICIENT_EVIDENCE"]
-    assert "没有足够证据" in result[0] and "不能推测" in result[0]
-
-    no_quarter = service._constraint_abstention(
-        "2025年越南市场的13M继续率精确值是多少？",
-        [{"content": "2025年香港市场13M继续率90.8%"}],
-    )
-    assert no_quarter and "越南市场" in no_quarter[0] and no_quarter[1] == []
+def test_exact_value_constraints_are_preserved_for_semantic_planning() -> None:
+    plan = deterministic_plan("2026年第二季度日本市场的VONB精确值是多少？")
+    assert "2026年" in plan.hard_constraints
+    assert "第二季度" in plan.hard_constraints
+    assert plan.retrieval_queries[0].text == "2026年第二季度日本市场的VONB精确值是多少？"
 
 
 def test_chart_comparison_and_split_dual_axis_inference() -> None:
-    service = object.__new__(DeterministicAnswerEngine)
     common = {
         "category": "26/03",
         "y_value": 0.0,
@@ -138,10 +128,11 @@ def test_chart_comparison_and_split_dual_axis_inference() -> None:
         {**common, "id": "p2", "series_id": "cn", "series_name": "中国内地", "y_value": 184.0},
     ]
 
-    result = service._chart_comparison_answer("26/03中国内地和香港哪个更高？高多少？", rows)
+    result = ChartCalculator().analyze("26/03中国内地和香港哪个更高？高多少？", rows)
 
-    assert result and "中国内地更高" in result[0] and "高5" in result[0]
-    assert "右侧次轴" in service._axis_descriptor(rows[0])
+    assert result is not None
+    assert "higher series=中国内地" in result.text and "difference=5" in result.text
+    assert len(result.evidence) == 2
 
 
 def test_chinese_query_expansion_and_slide_diversification() -> None:

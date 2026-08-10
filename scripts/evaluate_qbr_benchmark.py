@@ -25,7 +25,7 @@ DIMENSION_WEIGHTS = {
     "retrieval_hit": 0.10,
     "groundedness": 0.05,
     "relevance": 0.08,
-    "answer_mode": 0.05,
+    "task_alignment": 0.05,
     "citation_economy": 0.02,
 }
 ABSTENTION_TERMS = ("没有足够证据", "证据不足", "未提供", "无法回答", "不能回答", "不可回答")
@@ -207,21 +207,15 @@ def evaluate_case(
     )
     message = dict(run.get("message") or {})
     message_metadata = dict(message.get("metadata") or {})
-    expected_answer_mode = case.get("expected_answer_mode")
-    answer_mode_score = float(message_metadata.get("answer_mode") == expected_answer_mode) if expected_answer_mode else None
+    query_plan = dict(message_metadata.get("query_plan") or {})
+    task_alignment_score = group_coverage(str(query_plan.get("task_summary") or ""), case.get("expected_task_terms", []))
     max_citations = case.get("max_citations")
     citation_economy = float(len(citations) <= int(max_citations)) if max_citations is not None else None
-    curated_grounding = (
-        message_metadata.get("knowledge_source") in {"curated_glossary", "curated_glossary+document"}
-        and expected_answer_mode == "term_definition"
-    )
     groundedness = (
         1.0
         if expected_abstention and abstained and not citations
         else 0.0
         if expected_abstention
-        else 1.0
-        if curated_grounding
         else ((citation_recall_score or 0.0) + citation_precision_score) / 2
     )
     dimensions: dict[str, float | None] = {
@@ -232,7 +226,7 @@ def evaluate_case(
         "retrieval_hit": evidence_recall(retrieval_refs, case.get("evidence_groups", []), reverse_ids),
         "groundedness": groundedness,
         "relevance": forbidden_group_absence(answer, case.get("forbidden_groups", [])),
-        "answer_mode": answer_mode_score,
+        "task_alignment": task_alignment_score,
         "citation_economy": citation_economy,
     }
     public_citations = [
@@ -321,7 +315,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
         "",
         f"- Dataset: `{payload['dataset']}@{payload['version']}`",
         f"- Generated: `{payload['generated_at']}`",
-        f"- Answer mode: `{payload['answer_mode']}`",
+        f"- Generation mode: `{payload['generation_mode']}`",
         f"- Retrieval strategy: `{payload['retrieval_strategy']}`",
         f"- Overall score: **{summary['overall_score']:.2f}/100**",
         f"- Median score: **{summary['median_score']:.2f}/100**",
@@ -429,7 +423,7 @@ def main() -> None:
         "dataset": dataset["dataset"],
         "version": dataset["version"],
         "generated_at": datetime.now(UTC).isoformat(),
-        "answer_mode": "deterministic_local_no_llm",
+        "generation_mode": "semantic_task_frame_local_fallback",
         "retrieval_strategy": arguments.retrieval_strategy,
         "rerank": {"enabled": arguments.rerank, "model": arguments.rerank_model if arguments.rerank else None},
         "weights": DIMENSION_WEIGHTS,

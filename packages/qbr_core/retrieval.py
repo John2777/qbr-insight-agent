@@ -268,7 +268,7 @@ class EvidenceRetriever:
                 rejected_roles[role] = rejected_roles.get(role, 0) + 1
                 continue
             content = str(row.get("content") or "").casefold()
-            task_bonus = max(self._task_compatibility(intent, role, content) for intent in plan.active_intents)
+            task_bonus = self._task_compatibility(plan, role, content)
             row["content_role"] = role
             row["matched_queries"] = matched_queries.get(chunk_id, [])
             row["multi_query_score"] = round(scores[chunk_id], 8)
@@ -288,8 +288,8 @@ class EvidenceRetriever:
             f"multi_query:{strategy or self.mode}",
             " | ".join(item.text for item in plan.retrieval_queries),
             {
-                "intent": plan.intent,
-                "active_intents": list(plan.active_intents),
+                "task_summary": plan.task_summary,
+                "operations": list(plan.operations),
                 "query_count": len(plan.retrieval_queries),
                 "unique_candidates": len(fused),
                 "eligible_candidates": len(ranked),
@@ -344,7 +344,7 @@ class EvidenceRetriever:
         return ranked, details
 
     @staticmethod
-    def _task_compatibility(intent: str, role: str, content: str) -> float:
+    def _task_compatibility(plan: QueryPlan, role: str, content: str) -> float:
         role_bonus = {
             "business_fact": 0.4,
             "management_insight": 0.8,
@@ -355,56 +355,27 @@ class EvidenceRetriever:
             "methodology": -0.8,
             "boilerplate": -1.5,
         }.get(role, 0.0)
-        if intent in {"negative_signal_summary", "risk_explanation"}:
-            markers = (
-                "risk",
-                "concern",
-                "challenge",
-                "pressure",
-                "decline",
-                "below",
-                "warning",
-                "breach",
-                "volatile",
-                "风险",
-                "挑战",
-                "承压",
-                "下降",
-                "下滑",
-                "低于",
-                "阈值",
-                "限额",
-                "波动",
-                "集中",
-                "↑",
+        task_text = " ".join(
+            (
+                plan.canonical_question,
+                plan.task_summary,
+                *plan.operations,
+                *plan.evidence_requirements,
+                *(query.text for query in plan.retrieval_queries),
             )
-            return role_bonus + min(3.0, sum(0.45 for marker in markers if marker in content))
-        if intent == "business_evaluation":
-            markers = (
-                "above",
-                "growth",
-                "improv",
-                "leading",
-                "momentum",
-                "outperform",
-                "record",
-                "strong",
-                "target",
-                "增长",
-                "提升",
-                "改善",
-                "领先",
-                "动量",
-                "新高",
-                "强劲",
-                "达标",
-                "绿色",
-                "多元",
-            )
-            return role_bonus + min(3.0, sum(0.4 for marker in markers if marker in content))
-        if intent == "provenance":
-            return 1.5 if role == "provenance" else role_bonus
-        return role_bonus
+        ).casefold()
+        terms = {
+            token
+            for token in re.findall(r"[a-z0-9%_-]{2,}|[\u4e00-\u9fff]{2,}", task_text)
+            if token not in {"what", "which", "this", "that", "with", "from", "directly", "evidence"}
+        }
+        semantic_overlap = min(3.0, sum(0.45 for term in terms if term in content))
+        numeric_request = any(
+            marker in plan.original_question.casefold()
+            for marker in ("多少", "数值", "准确值", "变化", "增长", "value", "how much", "change", "growth")
+        )
+        authoritative_numeric_bonus = 1.5 if numeric_request and role in {"chart", "table"} else 0.0
+        return role_bonus + semantic_overlap + authoritative_numeric_bonus
 
     @staticmethod
     def _select_diverse(
