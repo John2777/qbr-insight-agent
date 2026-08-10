@@ -15,13 +15,34 @@ from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
 
 
 class PlannerModel:
-    def __init__(self, content: str | Exception) -> None:
+    def __init__(
+        self,
+        content: str | Exception,
+        *,
+        finish_reason: str | None = None,
+        output_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+    ) -> None:
         self.content = content
+        self.finish_reason = finish_reason
+        self.output_tokens = output_tokens
+        self.reasoning_tokens = reasoning_tokens
 
     def invoke(self, _messages: Any) -> AIMessage:
         if isinstance(self.content, Exception):
             raise self.content
-        return AIMessage(content=self.content)
+        metadata: dict[str, Any] = {}
+        if self.finish_reason is not None:
+            metadata["finish_reason"] = self.finish_reason
+        usage: dict[str, Any] | None = None
+        if self.output_tokens is not None:
+            usage = {
+                "input_tokens": 10,
+                "output_tokens": self.output_tokens,
+                "total_tokens": 10 + self.output_tokens,
+                "output_token_details": {"reasoning": self.reasoning_tokens or 0},
+            }
+        return AIMessage(content=self.content, response_metadata=metadata, usage_metadata=usage)
 
 
 def _seed_pipeline_document(service: QBRService) -> str:
@@ -183,9 +204,22 @@ def test_planner_provider_failure_uses_non_classifying_language_fallback(caplog:
 
 
 def test_invalid_planner_output_falls_back_without_inventing_a_category() -> None:
-    plan = QueryPlannerAgent(PlannerModel('{"canonical_question":"x"}')).plan("VONB是什么意思？")
+    plan = QueryPlannerAgent(
+        PlannerModel(
+            "",
+            finish_reason="length",
+            output_tokens=1202,
+            reasoning_tokens=1200,
+        )
+    ).plan("VONB是什么意思？")
     assert plan.planner == "linguistic_fallback"
     assert plan.warnings == ("QUERY_PLANNER_OUTPUT_INVALID",)
+    assert plan.diagnostics == {
+        "content_length": 0,
+        "finish_reason": "length",
+        "output_tokens": 1202,
+        "reasoning_tokens": 1200,
+    }
 
 
 def test_evidence_pack_uses_semantic_requirements_and_rejects_off_task_notes() -> None:
@@ -215,6 +249,45 @@ def test_evidence_pack_uses_semantic_requirements_and_rejects_off_task_notes() -
     assert "[Sources]" not in quotes
 
 
+def test_evidence_pack_rejects_headings_and_semantic_duplicates_without_an_intent_router() -> None:
+    plan = deterministic_plan("当前文档有哪些潜在问题？")
+    candidates = [
+        {
+            "id": "heading",
+            "document_version_id": "dv",
+            "slide_id": "s1",
+            "slide_no": 1,
+            "chunk_type": "text",
+            "content": "NEXT-QUARTER PRIORITIES & RISK GATES",
+            "retrieval_score": 5,
+        },
+        {
+            "id": "fact",
+            "document_version_id": "dv",
+            "slide_id": "s2",
+            "slide_no": 2,
+            "chunk_type": "text",
+            "content": "股东资本比率为221%，高于210%的绿色阈值。",
+            "retrieval_score": 4,
+        },
+        {
+            "id": "duplicate",
+            "document_version_id": "dv",
+            "slide_id": "s3",
+            "slide_no": 3,
+            "chunk_type": "text",
+            "content": "股东资本比率为221%，高于210%的绿色阈值！",
+            "retrieval_score": 3,
+        },
+    ]
+
+    pack = EvidencePackBuilder().build(plan, candidates)
+
+    assert len(pack.atoms) == 1
+    assert "221%" in pack.atoms[0].quote
+    assert pack.diagnostics["rejected_quality"]["heading_like"] == 1
+
+
 def test_multiroute_retrieval_uses_paraphrase_bridges_without_intent_router(tmp_path: Path) -> None:
     service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
     document_id = _seed_pipeline_document(service)
@@ -240,6 +313,8 @@ def test_end_to_end_metadata_exposes_task_frame_not_intent_taxonomy(tmp_path: Pa
     assert "intent" not in plan and "active_intents" not in plan
     assert message["metadata"]["answer_routing"]["strategy"] == "semantic_grounding"
     assert "文档中的核心图表指标" not in message["content"]
+    assert not message["content"].startswith("编号证据")
+    assert "可核验证据" in message["content"]
 
 
 def test_extract_relevant_quote_keeps_complete_semantic_units() -> None:

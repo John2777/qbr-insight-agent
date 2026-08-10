@@ -96,11 +96,13 @@ SQLite 的 `chunk_embeddings` 是 embedding 权威数据，FAISS 文件只是按
 
 ```dotenv
 LLM_ENABLED=true
+LLM_PROVIDER=qwen-bailian-singapore
 LLM_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=server-side-secret
 LLM_MODEL=qwen3.7-plus
 PLANNER_MODEL=qwen3.6-flash
 DEEP_LLM_MODEL=qwen3.7-max
+LLM_MAX_TOKENS=2000
 
 RETRIEVAL_STRATEGY=hybrid
 EMBEDDING_BASE_URL=https://YOUR-WORKSPACE.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
@@ -120,6 +122,8 @@ VISION_ENRICH_ALL_SLIDES=false
 ```
 
 未单独设置 `EMBEDDING_API_KEY`、`RERANK_API_KEY` 或 `VISION_API_KEY` 时会复用服务端 `LLM_API_KEY`。默认只分析含图片元素的页面，并受 `VISION_MAX_SLIDES` 成本上限保护；显式设置 `VISION_ENRICH_ALL_SLIDES=true` 才分析整份演示文稿。视觉模型生成 `slide_visual_summary`、`visual_ocr`、`visual_observation` 三类可审计 chunk；它们标记为补充视觉证据，不能覆盖原生表格/图表数值。Embedding 身份包含 endpoint、模型与配置维度，任一配置变化都会安全重建旧向量。
+
+语义规划器要求输出紧凑 JSON，因此应用会显式关闭该角色的 thinking；答案角色同样关闭 thinking，把 token 预算留给可见、可校验的正文。四份测试 PPT 的复杂题验证表明，千问答案上限使用 `LLM_MAX_TOKENS=2000` 可避免 1200-token 配置下的长答案截断。
 
 ## 验证
 

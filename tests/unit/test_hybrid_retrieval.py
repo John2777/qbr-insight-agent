@@ -9,6 +9,7 @@ import pytest
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.calculations import ChartCalculator
 from packages.qbr_core.db import Database, utc_now
+from packages.qbr_core.query_planning import deterministic_plan
 from packages.qbr_core.retrieval import EvidenceRetriever
 from packages.qbr_core.vector import FaissVectorStore, HashingEmbeddingProvider
 
@@ -145,6 +146,7 @@ def _seed_chunk(
     chunk_id: str,
     content: str,
     active_run: bool,
+    chunk_type: str = "text",
 ) -> None:
     now = utc_now()
     with db.transaction(immediate=True) as conn:
@@ -165,8 +167,8 @@ def _seed_chunk(
             (slide_id, parser_run_id, version_id, 1, content, content, None, 1, 1, None, 1.0),
         )
         conn.execute(
-            "INSERT INTO chunks VALUES (?,?,?,?,NULL,'text',?,'{}',?,1)",
-            (chunk_id, "ws_demo", version_id, slide_id, content, chunk_id),
+            "INSERT INTO chunks VALUES (?,?,?,?,NULL,?,?,'{}',?,1)",
+            (chunk_id, "ws_demo", version_id, slide_id, chunk_type, content, chunk_id),
         )
         conn.execute("INSERT INTO chunk_fts(chunk_id,workspace_id,content) VALUES (?,?,?)", (chunk_id, "ws_demo", content))
         if active_run:
@@ -229,3 +231,26 @@ def test_faiss_filters_document_scope_and_inactive_parser_runs(tmp_path: Path) -
     with db.read() as conn:
         indexed_ids = {row[0] for row in conn.execute("SELECT chunk_id FROM chunk_embeddings")}
     assert indexed_ids == {"chunk_a", "chunk_b"}
+
+
+def test_document_anchors_return_structured_facts_for_broad_cross_document_tasks(tmp_path: Path) -> None:
+    db = Database(tmp_path / "app.sqlite3")
+    db.initialize()
+    _seed_chunk(
+        db,
+        document_id="doc_table",
+        version_id="dv_table",
+        parser_run_id="run_table",
+        slide_id="slide_table",
+        chunk_id="chunk_table",
+        content="渠道 | CAC | 继续率\n数字直销 | 74 | 84.1%",
+        active_run=True,
+        chunk_type="table",
+    )
+    plan = deterministic_plan("综合多份报告提出管理行动", ["doc_table", "doc_other"])
+
+    anchors = EvidenceRetriever(db).document_anchors(plan, "ws_demo", "doc_table")
+
+    assert [row["id"] for row in anchors] == ["chunk_table"]
+    assert anchors[0]["content_role"] == "table"
+    assert anchors[0]["matched_queries"] == ["document_anchor"]

@@ -1,7 +1,9 @@
-.codex
-.idea
-.tmp_qbr
-.agents/skills/graphify
+/.codex/
+/sample_project/
+/.idea/
+/.agents/
+/.tmp_qbr/
+/.tmp_qbr_9mb/
 /awskey/
 /output/
 /graphify-out/

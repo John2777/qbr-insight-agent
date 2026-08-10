@@ -266,7 +266,12 @@ def extract_relevant_quote(content: str, plan: QueryPlan, *, chunk_type: str = "
     return "\n".join(units[index] for index in sorted(expanded))
 
 
-def infer_facet(content: str, plan: QueryPlan) -> str:
+def _document_tags(text: str) -> set[str]:
+    normalized = re.sub(r"[^a-z0-9]", "", text.casefold())
+    return set(re.findall(r"qbr0?\d|9mb", normalized))
+
+
+def infer_facet(content: str, plan: QueryPlan, *, document_title: str = "") -> str:
     def semantic_tokens(text: str) -> set[str]:
         folded = text.casefold()
         tokens = set(re.findall(r"[a-z0-9%_-]{2,}", folded))
@@ -277,9 +282,13 @@ def infer_facet(content: str, plan: QueryPlan) -> str:
         return tokens
 
     content_terms = semantic_tokens(content)
+    source_tags = _document_tags(document_title)
     best_requirement = ""
     best_score = 0
     for requirement in plan.evidence_requirements:
+        requirement_tags = _document_tags(requirement)
+        if requirement_tags and source_tags and requirement_tags.isdisjoint(source_tags):
+            continue
         requirement_terms = semantic_tokens(requirement)
         score = len(content_terms & requirement_terms)
         if score > best_score:
@@ -288,17 +297,53 @@ def infer_facet(content: str, plan: QueryPlan) -> str:
     return best_requirement or "directly relevant evidence"
 
 
-def _is_heading_like_negative(content: str) -> bool:
+def _is_heading_like(content: str) -> bool:
     compact = re.sub(r"\s+", " ", content).strip()
     folded = compact.casefold()
     if folded.startswith("section "):
         return True
+    if compact.endswith(("。", ".", "！", "!", "？", "?", "；", ";")):
+        return False
     has_predicate = any(marker in folded for marker in NEGATIVE_PREDICATE_MARKERS)
     latin_letters = re.sub(r"[^A-Za-z]", "", compact)
     if latin_letters and len(compact) <= 80 and latin_letters.upper() == latin_letters and not has_predicate:
         return True
     token_count = len(re.findall(r"[A-Za-z0-9%]+|[\u4e00-\u9fff]{2,}", compact))
     return len(compact) <= 90 and token_count <= 6 and not has_predicate
+
+
+def _task_requests_context_role(plan: QueryPlan, role: str) -> bool:
+    corpus = " ".join(
+        [
+            plan.original_question,
+            plan.canonical_question,
+            plan.task_summary,
+            plan.answer_brief,
+            *plan.operations,
+            *plan.evidence_requirements,
+            *(item.text for item in plan.retrieval_queries),
+        ]
+    ).casefold()
+    if role == "provenance":
+        markers = ("来源", "出处", "公开披露", "数据源", "source", "provenance", "official disclosure", "public baseline")
+    else:
+        markers = ("方法", "口径", "生成方式", "模拟数据", "method", "methodology", "synthetic", "calculation basis")
+    return any(marker in corpus for marker in markers)
+
+
+def _dedupe_terms(text: str) -> set[str]:
+    folded = text.casefold()
+    terms = set(re.findall(r"[a-z0-9%_.-]{2,}", folded))
+    for phrase in re.findall(r"[\u4e00-\u9fff]{2,}", folded):
+        terms.update(phrase[index : index + 2] for index in range(len(phrase) - 1))
+    return terms
+
+
+def _near_duplicate(left: str, right: str) -> bool:
+    left_terms, right_terms = _dedupe_terms(left), _dedupe_terms(right)
+    if not left_terms or not right_terms:
+        return False
+    return len(left_terms & right_terms) / max(len(left_terms), len(right_terms)) >= 0.88
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,6 +436,9 @@ class EvidencePackBuilder:
             if role in plan.excluded_content_roles or (plan.allowed_content_roles and role not in plan.allowed_content_roles):
                 rejected_roles[role] = rejected_roles.get(role, 0) + 1
                 continue
+            if role in {"provenance", "methodology"} and not _task_requests_context_role(plan, role):
+                rejected_roles[role] = rejected_roles.get(role, 0) + 1
+                continue
             content = str(row.get("content") or "").strip()
             if (
                 str(row.get("source_kind") or "") == "visual_model"
@@ -399,7 +447,7 @@ class EvidencePackBuilder:
             ):
                 rejected_quality["visual_numeric"] = rejected_quality.get("visual_numeric", 0) + 1
                 continue
-            facet = infer_facet(content, plan)
+            facet = infer_facet(content, plan, document_title=str(row.get("document_title") or ""))
             quote = extract_relevant_quote(content, plan, chunk_type=str(row.get("chunk_type") or "text"))
             if not quote:
                 continue
@@ -407,7 +455,7 @@ class EvidencePackBuilder:
             if role in {"provenance", "methodology"} and semantic_score <= 0:
                 rejected_quality["off_task_context"] = rejected_quality.get("off_task_context", 0) + 1
                 continue
-            if role == "risk_signal" and _is_heading_like_negative(content) and semantic_score <= 0:
+            if role in {"business_fact", "risk_signal", "management_insight"} and _is_heading_like(content):
                 rejected_quality["heading_like"] = rejected_quality.get("heading_like", 0) + 1
                 continue
             score = float(row.get("task_score") or row.get("retrieval_score") or 0.0)
@@ -421,25 +469,45 @@ class EvidencePackBuilder:
         per_slide: dict[tuple[str, str], int] = {}
         total_chars = 0
         budget_rejections = 0
-        for score, row, role, facet, quote in ranked:
+
+        def add_atom(score: float, row: dict[str, Any], role: str, facet: str, quote: str) -> bool:
+            nonlocal total_chars, budget_rejections
             normalized = re.sub(r"\s+", " ", quote).casefold()
-            if normalized in seen_quotes:
-                continue
+            if normalized in seen_quotes or any(_near_duplicate(quote, atom.quote) for atom in atoms):
+                return False
             slide_key = (str(row.get("document_id") or ""), str(row.get("slide_id") or ""))
             if per_slide.get(slide_key, 0) >= 2:
-                continue
+                return False
             if atoms and total_chars + len(quote) > max_total_chars:
                 budget_rejections += 1
-                continue
+                return False
             atoms.append(EvidenceAtom(f"ev_{len(atoms) + 1}", quote, role, facet, round(score, 6), row))
             total_chars += len(quote)
             seen_quotes.add(normalized)
             per_slide[slide_key] = per_slide.get(slide_key, 0) + 1
+            return True
+
+        if len(plan.document_ids) > 1:
+            for document_id in plan.document_ids:
+                for item in ranked:
+                    if str(item[1].get("document_id") or "") != document_id:
+                        continue
+                    if add_atom(*item):
+                        break
+                if len(atoms) >= max_atoms:
+                    break
+
+        for item in ranked:
             if len(atoms) >= max_atoms:
                 break
+            add_atom(*item)
 
         covered = tuple(dict.fromkeys(atom.facet for atom in atoms if atom.facet))
         missing = tuple(requirement for requirement in plan.evidence_requirements if requirement not in covered)
+        covered_documents = tuple(
+            dict.fromkeys(str(atom.source.get("document_id") or "") for atom in atoms if atom.source.get("document_id"))
+        )
+        missing_documents = tuple(document_id for document_id in plan.document_ids if document_id not in covered_documents)
         minimum_atoms = 2 if plan.execution_profile == "deep" else 1
         answerable = len(atoms) >= minimum_atoms
         return EvidencePack(
@@ -455,5 +523,7 @@ class EvidencePackBuilder:
                 "rejected_quality": rejected_quality,
                 "quote_chars": total_chars,
                 "budget_rejections": budget_rejections,
+                "covered_document_ids": list(covered_documents),
+                "missing_document_ids": list(missing_documents),
             },
         )

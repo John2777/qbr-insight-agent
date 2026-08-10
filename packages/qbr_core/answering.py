@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -19,6 +20,7 @@ class AnswerResult:
     evidence: list[dict[str, Any]]
     warnings: list[str]
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    grounding_context: str = ""
 
     def legacy(self) -> tuple[str, list[dict[str, Any]], list[str]]:
         return self.answer, self.evidence, self.warnings
@@ -64,8 +66,13 @@ class DeterministicAnswerEngine:
     ) -> AnswerResult:
         task = plan or deterministic_plan(question, document_ids)
         retrieval = self.retriever.search_plan(task, workspace_id, document_ids, top_k=16)
+        if len(document_ids) > 1:
+            retrieval = self._supplement_document_lanes(task, workspace_id, document_ids, retrieval)
         pack = self.evidence_builder.build(task, retrieval.items, max_atoms=8)
-        if task.execution_profile == "deep" and pack.missing_facets and len(pack.covered_facets) < 2:
+        missing_documents = pack.diagnostics.get("missing_document_ids", [])
+        if task.execution_profile == "deep" and (
+            (pack.missing_facets and len(pack.covered_facets) < 2) or missing_documents
+        ):
             retrieval, pack = self._retry_missing_evidence(task, workspace_id, document_ids, retrieval, pack)
 
         calculation = self.chart_calculator.analyze(
@@ -76,7 +83,7 @@ class DeterministicAnswerEngine:
         warnings = list(task.warnings)
         if not pack.answerable and calculation is None:
             warnings.append("INSUFFICIENT_EVIDENCE")
-        elif pack.missing_facets and calculation is None:
+        elif (pack.missing_facets or pack.diagnostics.get("missing_document_ids")) and calculation is None:
             warnings.append("PARTIAL_EVIDENCE_COVERAGE")
         diagnostics = {
             "query_plan": task.to_dict(),
@@ -89,11 +96,48 @@ class DeterministicAnswerEngine:
             "evidence_pack": pack.to_dict(),
             "verified_calculation": calculation.text if calculation else None,
         }
+        grounding_context = self._render_grounding_context(task, evidence, calculation)
+        safe_answer = self._render_safe_fallback(task, evidence, calculation, pack)
         return AnswerResult(
-            self._render_grounding_context(task, evidence, calculation),
+            safe_answer,
             evidence,
             list(dict.fromkeys(warnings)),
             diagnostics,
+            grounding_context,
+        )
+
+    def _supplement_document_lanes(
+        self,
+        plan: QueryPlan,
+        workspace_id: str,
+        document_ids: list[str],
+        retrieval: RetrievalResult,
+    ) -> RetrievalResult:
+        """Give every scoped document an independent retrieval lane before global evidence competition."""
+
+        merged = {str(row["id"]): row for row in retrieval.items}
+        lane_diagnostics: list[dict[str, Any]] = []
+        lane_top_k = max(4, min(8, 16 // len(document_ids) + 2))
+        for document_id in document_ids:
+            lane = self.retriever.search_plan(plan, workspace_id, [document_id], top_k=lane_top_k)
+            for row in lane.items:
+                merged.setdefault(str(row["id"]), row)
+            anchors = self.retriever.document_anchors(plan, workspace_id, document_id, limit=4)
+            for row in anchors:
+                merged.setdefault(str(row["id"]), row)
+            lane_diagnostics.append(
+                {
+                    "document_id": document_id,
+                    "candidate_count": len(lane.items),
+                    "anchor_count": len(anchors),
+                    "strategy": lane.strategy,
+                }
+            )
+        return RetrievalResult(
+            list(merged.values()),
+            retrieval.strategy + "+document_lanes",
+            retrieval.query,
+            {**retrieval.diagnostics, "document_lanes": lane_diagnostics},
         )
 
     def _retry_missing_evidence(
@@ -112,7 +156,17 @@ class DeterministicAnswerEngine:
         retry = self.retriever.search_plan(retry_plan, workspace_id, document_ids, top_k=16)
         combined = {str(row["id"]): row for row in (*retrieval.items, *retry.items)}
         retry_pack = self.evidence_builder.build(plan, combined.values(), max_atoms=8)
-        if (len(retry_pack.covered_facets), len(retry_pack.atoms)) > (len(pack.covered_facets), len(pack.atoms)):
+        retry_quality = (
+            len(retry_pack.diagnostics.get("covered_document_ids", [])),
+            len(retry_pack.covered_facets),
+            len(retry_pack.atoms),
+        )
+        current_quality = (
+            len(pack.diagnostics.get("covered_document_ids", [])),
+            len(pack.covered_facets),
+            len(pack.atoms),
+        )
+        if retry_quality > current_quality:
             return retry, retry_pack
         return retrieval, pack
 
@@ -176,6 +230,98 @@ class DeterministicAnswerEngine:
         lines = [f"[{index}] {item.get('quote', '')}" for index, item in enumerate(evidence, 1)]
         sections.append(evidence_label + ":\n" + "\n".join(lines))
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _compact_chart_quote(quote: str) -> str:
+        """Turn a raw chart-series dump into a small, replayable fact summary."""
+
+        line = next((item.strip() for item in quote.splitlines() if item.strip()), quote.strip())
+        points = re.findall(r"([^;=|]+)=\s*([-+]?\d+(?:\.\d+)?%?)", line)
+        if len(points) < 4:
+            return line
+        series_name = line.split("|", 1)[0].strip()
+        first_label, first_value = points[0][0].strip(), points[0][1]
+        last_label, last_value = points[-1][0].strip(), points[-1][1]
+        return f"{series_name}：{first_label}={first_value}，{last_label}={last_value}（图表共 {len(points)} 个观测点）"
+
+    @classmethod
+    def _render_safe_fallback(
+        cls,
+        plan: QueryPlan,
+        evidence: list[dict[str, Any]],
+        calculation: VerifiedCalculation | None,
+        pack: EvidencePack,
+    ) -> str:
+        """Render a readable, evidence-preserving answer when model prose is unavailable."""
+
+        if not evidence:
+            return "当前文档范围内没有检索到足够证据回答这个问题。" if plan.answer_language == "zh" else (
+                "The current document scope did not yield enough evidence to answer this question."
+            )
+
+        task_text = " ".join(
+            [plan.original_question, plan.canonical_question, plan.task_summary, plan.answer_brief, *plan.operations]
+        ).casefold()
+        provenance_requested = any(
+            marker in task_text
+            for marker in ("来源", "出处", "公开披露", "数据源", "source", "provenance", "methodology", "口径")
+        )
+        labels_zh = {
+            "risk_signal": "风险或压力信号",
+            "management_insight": "管理关注事项",
+            "chart": "图表事实",
+            "table": "表格事实",
+            "business_fact": "业务事实",
+            "provenance": "来源说明",
+            "methodology": "方法说明",
+        }
+        labels_en = {
+            "risk_signal": "Risk or pressure signal",
+            "management_insight": "Management attention",
+            "chart": "Chart fact",
+            "table": "Table fact",
+            "business_fact": "Business fact",
+            "provenance": "Source note",
+            "methodology": "Methodology note",
+        }
+
+        lines: list[str] = []
+        if calculation is not None:
+            label = "已验证计算" if plan.answer_language == "zh" else "Verified calculation"
+            lines.append(f"- {label}：{calculation.text}")
+        for index, item in enumerate(evidence, 1):
+            if calculation is not None and index <= len(calculation.evidence):
+                continue
+            role = str(item.get("content_role") or "business_fact")
+            if role in {"provenance", "methodology"} and not provenance_requested:
+                continue
+            quote = str(item.get("quote") or "").strip()
+            if not quote:
+                continue
+            if role == "chart":
+                quote = cls._compact_chart_quote(quote)
+            labels = labels_zh if plan.answer_language == "zh" else labels_en
+            lines.append(f"- {labels.get(role, labels['business_fact'])}：{quote} [{index}]")
+            if len(lines) >= 5:
+                break
+
+        if not lines:
+            # A source-oriented task may legitimately contain only provenance;
+            # otherwise expose one bounded fact instead of an unbounded dump.
+            item = evidence[0]
+            lines.append(f"- {str(item.get('quote') or '').strip()} [1]")
+
+        if plan.answer_language == "zh":
+            heading = "基于当前可核验证据，可以确认："
+            limitation = "\n\n证据覆盖仍不完整，以上仅保留当前文档能够直接支持的内容。" if pack.missing_facets else ""
+        else:
+            heading = "Based on the currently verifiable evidence:"
+            limitation = (
+                "\n\nEvidence coverage remains incomplete; only directly supported content is retained."
+                if pack.missing_facets
+                else ""
+            )
+        return heading + "\n\n" + "\n".join(lines) + limitation
 
     def _table_reasoning_answer(self, question: str, sources: list[dict[str, Any]]) -> Any:
         """Expose deterministic calculation as a tool; never use it as a prose router."""

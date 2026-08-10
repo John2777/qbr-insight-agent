@@ -84,7 +84,11 @@ class QBRService:
             planner_model = build_chat_model(
                 settings,
                 settings.planner_model or settings.llm_model,
-                thinking_enabled=True,
+                # The planner must emit a compact JSON object. Hidden reasoning can
+                # consume the entire completion budget before any JSON is emitted
+                # on OpenAI-compatible reasoning models (notably Qwen), so keep it
+                # disabled for this structured-output role.
+                thinking_enabled=False,
             )
         self.query_planner = QueryPlannerAgent(
             planner_model,

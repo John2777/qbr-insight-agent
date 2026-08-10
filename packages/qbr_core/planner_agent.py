@@ -43,6 +43,24 @@ def _message_text(message: Any) -> str:
     return str(content).strip()
 
 
+def _response_diagnostics(message: Any, text: str) -> dict[str, Any]:
+    metadata = getattr(message, "response_metadata", None) or {}
+    usage = getattr(message, "usage_metadata", None) or {}
+    token_usage = metadata.get("token_usage") if isinstance(metadata.get("token_usage"), dict) else {}
+    completion_details = (
+        token_usage.get("completion_tokens_details")
+        if isinstance(token_usage.get("completion_tokens_details"), dict)
+        else {}
+    )
+    output_details = usage.get("output_token_details") if isinstance(usage.get("output_token_details"), dict) else {}
+    return {
+        "content_length": len(text),
+        "finish_reason": metadata.get("finish_reason"),
+        "output_tokens": usage.get("output_tokens") or token_usage.get("completion_tokens"),
+        "reasoning_tokens": output_details.get("reasoning") or completion_details.get("reasoning_tokens"),
+    }
+
+
 def _json_object(text: str) -> dict[str, Any] | None:
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.S | re.I)
     candidate = fenced.group(1) if fenced else text
@@ -86,7 +104,8 @@ class QueryPlannerAgent:
         prompt = self._planner_prompt(question, baseline, history, document_vocabulary)
         try:
             message = self.model.invoke([SystemMessage(content=PLANNER_SYSTEM_PROMPT), HumanMessage(content=prompt)])
-            payload = _json_object(_message_text(message))
+            message_text = _message_text(message)
+            payload = _json_object(message_text)
         except Exception as exc:
             diagnostics = log_provider_failure(
                 logger,
@@ -102,7 +121,11 @@ class QueryPlannerAgent:
                 diagnostics=diagnostics,
             )
         if payload is None or not str(payload.get("task_summary") or "").strip():
-            return replace(baseline, warnings=("QUERY_PLANNER_OUTPUT_INVALID",))
+            return replace(
+                baseline,
+                warnings=("QUERY_PLANNER_OUTPUT_INVALID",),
+                diagnostics=_response_diagnostics(message, message_text),
+            )
         return self._semantic_plan(baseline, payload)
 
     @staticmethod

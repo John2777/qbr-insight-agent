@@ -370,14 +370,17 @@ class QAApplicationService:
                 "status": "disabled" if not self.settings.llm_enabled else "pending",
                 "thinking": "disabled",
                 "planner": plan.planner,
+                "answer_source": "safe_fallback" if not self.settings.llm_enabled else "pending",
             }
+            verification_info: dict[str, Any] = {"disposition": "not_run"}
             selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
             if selected_agent:
                 with self.db.transaction(immediate=True) as conn:
                     self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "正在基于证据生成回答"})
                 generated = selected_agent.answer(
                     question=question,
-                    grounding_context=answer,
+                    grounding_context=answer_result.grounding_context or answer,
+                    safe_fallback=answer,
                     evidence=evidence,
                     history=history,
                     task_frame=plan.to_dict(),
@@ -386,6 +389,7 @@ class QAApplicationService:
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
                 model_info = {**generated.model, "planner": plan.planner}
+                verification_info = generated.diagnostics
             message_metadata = {
                 "show_visuals": plan.needs_visuals,
                 "knowledge_source": "document_evidence",
@@ -394,6 +398,7 @@ class QAApplicationService:
                 "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
+                "verification": verification_info,
             }
             self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
         except Exception as exc:
@@ -440,6 +445,8 @@ class QAApplicationService:
                         "warning_codes": list(dict.fromkeys(warnings)),
                         "max_severity": max_severity,
                         "model_status": model_info.get("status"),
+                        "answer_source": model_info.get("answer_source"),
+                        "verification_disposition": (message_metadata or {}).get("verification", {}).get("disposition"),
                         "planner": model_info.get("planner"),
                     },
                     separators=(",", ":"),

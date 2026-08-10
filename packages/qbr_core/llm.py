@@ -36,6 +36,7 @@ class QAState(TypedDict, total=False):
     run_id: str
     question: str
     grounding_context: str
+    safe_fallback: str
     evidence: list[dict[str, Any]]
     history: list[dict[str, str]]
     candidate_answer: str
@@ -43,6 +44,7 @@ class QAState(TypedDict, total=False):
     warnings: list[str]
     model: dict[str, Any]
     task_frame: dict[str, Any]
+    verification: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -50,6 +52,7 @@ class LLMAnswer:
     answer: str
     warnings: list[str] = field(default_factory=list)
     model: dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 def _message_text(message: AIMessage) -> str:
@@ -96,7 +99,8 @@ def build_chat_model(
         "use_responses_api": False,
     }
     if thinking_enabled is not None:
-        extra_body = _thinking_body(settings.llm_provider, thinking_enabled)
+        provider_identity = " ".join((settings.llm_provider, model_name, settings.llm_base_url))
+        extra_body = _thinking_body(provider_identity, thinking_enabled)
         if extra_body:
             kwargs["extra_body"] = extra_body
     return ChatOpenAI(**kwargs)
@@ -128,6 +132,7 @@ class EvidenceQAAgent:
         evidence: list[dict[str, Any]],
         history: list[dict[str, str]],
         task_frame: dict[str, Any],
+        safe_fallback: str | None = None,
         run_id: str | None = None,
     ) -> LLMAnswer:
         result = self.graph.invoke(
@@ -135,6 +140,7 @@ class EvidenceQAAgent:
                 "question": question,
                 "run_id": run_id or "",
                 "grounding_context": grounding_context,
+                "safe_fallback": safe_fallback or grounding_context,
                 "evidence": evidence,
                 "history": history[-6:],
                 "task_frame": task_frame,
@@ -143,9 +149,10 @@ class EvidenceQAAgent:
             }
         )
         return LLMAnswer(
-            answer=result.get("answer") or grounding_context,
+            answer=result.get("answer") or safe_fallback or grounding_context,
             warnings=list(result.get("warnings", [])),
             model=dict(result.get("model", {})),
+            diagnostics=dict(result.get("verification", {})),
         )
 
     def _generate(self, state: QAState) -> dict[str, Any]:
@@ -217,22 +224,46 @@ class EvidenceQAAgent:
 
     def _verify(self, state: QAState) -> dict[str, Any]:
         candidate = state.get("candidate_answer", "").strip()
-        fallback = state["grounding_context"]
+        fallback = state.get("safe_fallback") or state["grounding_context"]
         warnings = list(state.get("warnings", []))
         if "LLM_OUTPUT_TRUNCATED" in warnings:
-            return {"answer": fallback, "warnings": list(dict.fromkeys(warnings))}
+            verification = {"disposition": "fallback", "reason": "output_truncated"}
+            model = {**state.get("model", {}), "answer_source": "safe_fallback"}
+            return {
+                "answer": fallback,
+                "warnings": list(dict.fromkeys(warnings)),
+                "model": model,
+                "verification": verification,
+            }
         if not candidate or len(candidate) > 5000:
             if "LLM_PROVIDER_ERROR" not in warnings:
                 warnings.append("LLM_EMPTY_OR_OVERSIZED_RESPONSE")
-            return {"answer": fallback, "warnings": warnings}
+            verification = {"disposition": "fallback", "reason": "provider_error" if not candidate else "response_size"}
+            model = {**state.get("model", {}), "status": "fallback", "answer_source": "safe_fallback"}
+            return {"answer": fallback, "warnings": warnings, "model": model, "verification": verification}
 
         verification = self.verifier.verify(
             candidate,
-            fallback=fallback,
+            fallback=state["grounding_context"],
             evidence=state["evidence"],
             task_frame=state.get("task_frame"),
         )
         warnings.extend(verification.warnings)
         if not verification.accepted:
-            return {"answer": fallback, "warnings": list(dict.fromkeys(warnings))}
-        return {"answer": candidate, "warnings": warnings}
+            model = {**state.get("model", {}), "status": "fallback", "answer_source": "safe_fallback"}
+            return {
+                "answer": fallback,
+                "warnings": list(dict.fromkeys(warnings)),
+                "model": model,
+                "verification": verification.diagnostics,
+            }
+        if verification.repaired_answer is not None:
+            model = {**state.get("model", {}), "status": "repaired", "answer_source": "model_repaired"}
+            return {
+                "answer": verification.repaired_answer,
+                "warnings": list(dict.fromkeys(warnings)),
+                "model": model,
+                "verification": verification.diagnostics,
+            }
+        model = {**state.get("model", {}), "answer_source": "model"}
+        return {"answer": candidate, "warnings": warnings, "model": model, "verification": verification.diagnostics}

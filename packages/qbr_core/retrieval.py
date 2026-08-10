@@ -129,6 +129,51 @@ class EvidenceRetriever:
         if self.vector_store is not None:
             self.vector_store.rebuild_workspace(workspace_id)
 
+    def document_anchors(
+        self,
+        plan: QueryPlan,
+        workspace_id: str,
+        document_id: str,
+        *,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        """Return authoritative structured facts so broad cross-document tasks cannot starve a deck."""
+
+        with self.db.read() as conn:
+            rows = conn.execute(
+                """
+                SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
+                  e.confidence element_confidence,0.0 AS lexical_rank
+                FROM chunks ch JOIN slides s ON s.id=ch.slide_id
+                JOIN document_versions dv ON dv.id=ch.document_version_id
+                JOIN documents d ON d.id=dv.document_id
+                LEFT JOIN elements e ON e.id=ch.element_id
+                WHERE ch.workspace_id=? AND d.id=? AND ch.active=1 AND d.deleted_at IS NULL
+                  AND s.parser_run_id=dv.active_parser_run_id
+                  AND (ch.chunk_type='table' OR ch.chunk_type LIKE 'chart%')
+                ORDER BY s.slide_no,ch.id
+                """,
+                (workspace_id, document_id),
+            ).fetchall()
+        ranked: list[dict[str, Any]] = []
+        for source in rows:
+            row = self._hydrate_source_metadata(dict(source))
+            role = classify_content_role(row)
+            content = str(row.get("content") or "").casefold()
+            row["content_role"] = role
+            row["retrieval_score"] = round(self._task_compatibility(plan, role, content), 8)
+            row["task_score"] = row["retrieval_score"]
+            row["matched_queries"] = ["document_anchor"]
+            ranked.append(row)
+        ranked.sort(
+            key=lambda item: (
+                -float(item.get("task_score") or 0.0),
+                -len(re.findall(r"\d", str(item.get("content") or ""))),
+                int(item.get("slide_no") or 0),
+            )
+        )
+        return self._select_diverse(ranked, limit, 1, plan.original_question)
+
     @staticmethod
     def _hydrate_source_metadata(row: dict[str, Any]) -> dict[str, Any]:
         try:
