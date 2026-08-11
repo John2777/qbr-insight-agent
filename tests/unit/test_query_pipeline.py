@@ -158,6 +158,11 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
                 ],
                 "execution_profile": "deep",
                 "needs_visuals": True,
+                "visual_structure": {
+                    "series_group_counts": [5, 5],
+                    "point_counts": [24],
+                    "chart_families": ["bar", "line", "unknown-family"],
+                },
                 "planner_confidence": 0.93,
             }
         )
@@ -172,6 +177,11 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
     assert plan.hard_constraints == ("2025", "Q2")
     assert plan.retrieval_queries[0].kind == "literal"
     assert "2025年第二季度" in corpus
+    assert plan.visual_structure == {
+        "series_group_counts": [5, 5],
+        "point_counts": [24],
+        "chart_families": ["bar", "line"],
+    }
 
 
 def test_planner_prompt_uses_structured_summary_only_for_reference_resolution() -> None:

@@ -122,3 +122,79 @@ def test_verifier_repairs_english_sentences_without_splitting_decimal_values() -
 
     assert result.accepted
     assert result.repaired_answer == "Revenue was 20.5. [1]"
+
+
+def _chart_bundle_evidence() -> list[dict[str, object]]:
+    scope = {
+        "kind": "chart_analysis",
+        "selected_series_names": [
+            "香港",
+            "中国内地",
+            "泰国",
+            "新加坡",
+            "其他市场",
+            "VONB Margin",
+            "13M Persistency",
+            "Digital STP",
+            "Agent Productivity",
+            "Protection Mix",
+        ],
+        "family_series": {
+            "bar": ["香港", "中国内地", "泰国", "新加坡", "其他市场"],
+            "line": ["VONB Margin", "13M Persistency", "Digital STP", "Agent Productivity", "Protection Mix"],
+        },
+        "excluded_document_series_names": ["OPAT", "UFSG", "Market Risk", "Credit Risk"],
+        "minimum_family_mentions": 2,
+        "no_pairwise_mapping": True,
+    }
+    return [
+        {
+            "document_title": "QBR",
+            "slide_no": 4,
+            "quote": "香港=238; 中国内地=249; VONB Margin=59.7; Protection Mix=46.3",
+            "content_role": "chart",
+            "chart_scope": scope,
+        }
+    ]
+
+
+def test_verifier_rejects_cross_slide_series_substitution_in_chart_analysis() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = "香港与中国内地产出增长，但OPAT与UFSG可能代表两项质量指标。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert not result.accepted
+    assert "LLM_CHART_SCOPE_VALIDATION_FAILED" in result.warnings
+    assert result.diagnostics["chart_scope"]["outside_scope_series"] == ["OPAT", "UFSG"]
+
+
+def test_verifier_requires_business_series_coverage_for_exhaustive_chart_analysis() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = "香港产出提高，同时VONB Margin改善。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert not result.accepted
+    assert "LLM_CHART_COVERAGE_VALIDATION_FAILED" in result.warnings
+    assert set(result.diagnostics["chart_scope"]["missing_family_coverage"]) == {"bar", "line"}
+
+
+def test_verifier_requires_source_series_names_without_a_maintained_alias_dictionary() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = "香港和中国内地贡献主要产出；新业务价值率改善，但保障业务占比回落。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert not result.accepted
+    assert "LLM_CHART_COVERAGE_VALIDATION_FAILED" in result.warnings
+
+
+def test_verifier_accepts_normalized_source_series_names() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = "香港和中国内地贡献主要产出；VONB-Margin改善，但Protection Mix回落。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted
+    assert result.warnings == ()

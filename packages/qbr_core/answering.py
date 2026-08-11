@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .calculations import ChartCalculator, VerifiedCalculation
+from .chart_analysis import ChartAnalyzer
 from .db import Database
 from .evidence import EvidencePack, EvidencePackBuilder
 from .query_planning import QueryPlan, RetrievalQuery, deterministic_plan
@@ -47,6 +48,7 @@ class DeterministicAnswerEngine:
         self.table_reasoning_skill = table_reasoning_skill
         self.evidence_builder = EvidencePackBuilder()
         self.chart_calculator = ChartCalculator()
+        self.chart_analyzer = ChartAnalyzer()
 
     def answer(
         self,
@@ -75,10 +77,26 @@ class DeterministicAnswerEngine:
         ):
             retrieval, pack = self._retry_missing_evidence(task, workspace_id, document_ids, retrieval, pack)
 
-        calculation = self.chart_calculator.analyze(
-            question,
-            self._load_chart_rows(workspace_id, document_ids),
-        )
+        chart_rows = self._load_chart_rows(workspace_id, document_ids)
+        calculation = self.chart_calculator.analyze(question, chart_rows)
+        if calculation is None:
+            preferred_element_ids = {
+                str(item.get("element_id") or "")
+                for item in pack.evidence
+                if item.get("element_id") and str(item.get("content_role") or "") == "chart"
+            }
+            preferred_slide_ids = {
+                str(item.get("slide_id") or "")
+                for item in pack.evidence
+                if item.get("slide_id")
+            }
+            calculation = self.chart_analyzer.analyze(
+                question,
+                chart_rows,
+                plan=task,
+                preferred_element_ids=preferred_element_ids,
+                preferred_slide_ids=preferred_slide_ids,
+            )
         if calculation is not None:
             pack = self.evidence_builder.with_additional_evidence(task, pack, calculation.evidence)
         evidence = self._merge_evidence(calculation, pack.evidence)
@@ -98,6 +116,9 @@ class DeterministicAnswerEngine:
             "evidence_pack": pack.to_dict(),
             "verified_calculation": calculation.text if calculation else None,
             "verified_calculation_facts": list(calculation.facts) if calculation else [],
+            "verified_calculation_kind": calculation.kind if calculation else None,
+            "verified_calculation_scope": calculation.scope if calculation else None,
+            "chart_scope": calculation.scope if calculation and calculation.kind == "chart_analysis" else None,
         }
         grounding_context = self._render_grounding_context(task, evidence, calculation)
         safe_answer = self._render_safe_fallback(task, evidence, calculation, pack)
@@ -184,7 +205,7 @@ class DeterministicAnswerEngine:
                 f"""
                 SELECT cp.*,cs.name series_name,cs.chart_type,cs.unit,cs.axis_id,cs.visual_json,
                   cs.confidence series_confidence,c.title chart_title,c.axes_json,
-                  c.source_kind,c.confidence chart_confidence,e.id element_id,e.bbox_json,
+                  c.id chart_id,c.source_kind,c.confidence chart_confidence,e.id element_id,e.bbox_json,
                   s.id slide_id,s.slide_no,s.title slide_title,s.summary slide_summary,
                   dv.id document_version_id,d.id document_id,d.title document_title
                 FROM chart_points cp JOIN chart_series cs ON cs.id=cp.series_id
@@ -205,7 +226,12 @@ class DeterministicAnswerEngine:
     ) -> list[dict[str, Any]]:
         merged: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
-        for item in (*(calculation.evidence if calculation else ()), *pack_evidence):
+        scoped_pack = pack_evidence
+        if calculation is not None:
+            slide_id = str(calculation.scope.get("slide_id") or "")
+            if slide_id:
+                scoped_pack = [item for item in pack_evidence if str(item.get("slide_id") or "") == slide_id]
+        for item in (*(calculation.evidence if calculation else ()), *scoped_pack):
             key = (
                 str(item.get("slide_id") or ""),
                 str(item.get("element_id") or item.get("chunk_id") or ""),
@@ -261,6 +287,17 @@ class DeterministicAnswerEngine:
             return "当前文档范围内没有检索到足够证据回答这个问题。" if plan.answer_language == "zh" else (
                 "The current document scope did not yield enough evidence to answer this question."
             )
+
+        if calculation is not None and calculation.kind == "chart_analysis" and calculation.fallback_text:
+            if not pack.coverage.has_gaps:
+                return calculation.fallback_text
+            gaps = pack.coverage.gap_labels[:3]
+            limitation = (
+                "\n\n当前资料暂未支持以下内容：" + "、".join(gaps) + "。"
+                if plan.answer_language == "zh"
+                else "\n\nThe current sources do not yet support: " + "; ".join(gaps) + "."
+            )
+            return calculation.fallback_text + limitation
 
         task_text = " ".join(
             [plan.original_question, plan.canonical_question, plan.task_summary, plan.answer_brief, *plan.operations]

@@ -373,6 +373,8 @@ class ParsedPersistenceService(ServiceComponent):
             unit_value = series.get("number_format") or axis.get("number_format")
             unit = self.db.json(unit_value) if isinstance(unit_value, dict | list) else unit_value
             visual = dict(series.get("visual", {}))
+            if series.get("grouping"):
+                visual["grouping"] = series["grouping"]
             if axis:
                 visual["axis"] = axis
             conn.execute(

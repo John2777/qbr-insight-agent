@@ -1,0 +1,156 @@
+{
+  "dataset": "qbr-chart-analysis",
+  "version": "2.0.0",
+  "language": "zh-CN",
+  "source_decks": {
+    "deployment": "output/Enterprise_Insurance_QBR_Deployment_Test_9MB.pptx"
+  },
+  "cases": [
+    {
+      "id": "chart-analysis-001",
+      "category": "broad_chart_analysis",
+      "scope": ["deployment"],
+      "question": "请解读下五大市场产出与五项质量指标构成高密度双轴监控图，分析并推理",
+      "standard_answer": "五大市场产出整体增长且结构较分散，中国内地和香港是最新一期最大市场。质量指标总体改善，但Agent Productivity和Protection Mix近期回落，与总产出继续增长形成值得关注的短期背离。柱状市场与折线质量指标没有一一对应关系，且本页为合成测试数据。",
+      "fact_groups": [["香港"], ["中国内地"], ["泰国"], ["新加坡"], ["其他市场"], ["vonb margin", "新业务价值率"], ["13m persistency", "13m继续率"], ["digital stp", "数字直通率"], ["agent productivity", "代理人生产率"], ["protection mix", "保障业务占比"]],
+      "numeric_groups": [["26.2%"], ["27.1%"], ["25.9%"]],
+      "forbidden_groups": [["opat"], ["ufsg"], ["市场风险"], ["信用风险"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 4}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 4}],
+      "expected_task_terms": [["图表", "双轴", "监控图"], ["分析", "解读", "推理"]],
+      "max_citations": 3
+    },
+    {
+      "id": "chart-analysis-002",
+      "category": "broad_chart_analysis",
+      "scope": ["deployment"],
+      "question": "这张24个月双轴控制图说明了什么？请指出增长结构、质量变化和潜在背离。",
+      "standard_answer": "总产出同比增长约26.2%，中国内地和香港合计约占53%。VONB Margin、13M Persistency和Digital STP总体改善；Agent Productivity和Protection Mix近期回落，是增长质量需要继续观察的背离信号。",
+      "fact_groups": [["中国内地"], ["香港"], ["vonb margin", "新业务价值率"], ["digital stp", "数字直通率"], ["agent productivity", "代理人生产率"], ["protection mix", "保障业务占比"], ["背离", "回落", "divergence", "declined"]],
+      "numeric_groups": [["26.2%"]],
+      "forbidden_groups": [["opat"], ["ufsg"], ["市场风险"], ["信用风险"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 4}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 4}]
+    },
+    {
+      "id": "chart-analysis-003",
+      "category": "broad_chart_analysis",
+      "scope": ["deployment"],
+      "question": "Interpret the five-market output bars and five quality lines in the 24-month control tower. What are the business takeaways?",
+      "standard_answer": "Output growth is broad-based rather than concentrated in one market. Mainland China and Hong Kong are the largest latest contributors. Margin, persistency and digital STP generally improve, while recent productivity and protection-mix pullbacks warrant monitoring. The chart does not establish a one-to-one market-to-quality mapping or causality.",
+      "fact_groups": [["hong kong", "香港"], ["mainland china", "中国内地"], ["vonb margin"], ["persistency"], ["digital stp"], ["agent productivity"], ["protection mix"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["opat"], ["ufsg"], ["market risk"], ["credit risk"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 4}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 4}]
+    },
+    {
+      "id": "chart-analysis-004",
+      "category": "chart_divergence",
+      "scope": ["deployment"],
+      "question": "五大市场产出继续增长时，五项质量指标里有哪些近期没有同步改善？这意味着什么？",
+      "standard_answer": "Agent Productivity从26/01近期峰值连续回落，Protection Mix最近三个月相对前三个月下降，而市场总产出继续增长。这是需要监控的描述性背离，可能提示增长与代理人效率、保障业务组合改善不同步，但图表本身不能证明因果关系。",
+      "fact_groups": [["agent productivity", "代理人生产率"], ["protection mix", "保障业务占比"], ["背离", "不同步"], ["不能证明因果", "非因果", "不代表因果", "does not establish causality"]],
+      "numeric_groups": [["5.8%"], ["-8.3%", "8.3%"], ["-5.9%"]],
+      "forbidden_groups": [["opat"], ["ufsg"], ["市场风险"], ["信用风险"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 4}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 4}]
+    },
+    {
+      "id": "chart-analysis-005",
+      "category": "multi_series_trend",
+      "scope": ["deployment"],
+      "question": "请分析8条客户旅程折线在24个月里的变化，最近哪些指标出现走弱？",
+      "standard_answer": "线索转化、核保通过、交叉销售和投诉闭环最近三期均值低于此前三期，其中交叉销售回落最明显；电子投保、13M继续率、NPS和健康活跃仍保持较好的长期改善。",
+      "fact_groups": [["线索转化"], ["核保通过"], ["交叉销售"], ["投诉闭环"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["opat"], ["香港"], ["protection mix"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 8}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 8}]
+    },
+    {
+      "id": "chart-analysis-006",
+      "category": "multi_series_trend",
+      "scope": ["deployment"],
+      "question": "Interpret the 24-period chart with eight customer-journey lines. Which series weakened most recently?",
+      "standard_answer": "The recent softening is concentrated in lead conversion, underwriting approval, cross-sell and complaint closure, while e-submission, persistency, NPS and health engagement remain stronger over the full period.",
+      "fact_groups": [["线索转化"], ["核保通过"], ["交叉销售"], ["投诉闭环"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["opat"], ["hong kong"], ["protection mix"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 8}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 8}]
+    },
+    {
+      "id": "chart-analysis-007",
+      "category": "stacked_output_trend",
+      "scope": ["deployment"],
+      "question": "这张包含5个产品、12个季度的柱状图体现了怎样的增长结构？",
+      "standard_answer": "五个产品从23Q1到25Q4均增长。健康和团险增幅更快，退休也明显扩张；保障和储蓄仍增长但相对更平稳，说明新增量逐步向健康、团险和退休扩散。",
+      "fact_groups": [["保障"], ["储蓄"], ["退休"], ["健康"], ["团险"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["digital stp"], ["香港"], ["资本比率"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 5}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 5}]
+    },
+    {
+      "id": "chart-analysis-008",
+      "category": "stacked_output_trend",
+      "scope": ["deployment"],
+      "question": "Analyze the five product series across twelve quarters and explain the growth mix.",
+      "standard_answer": "All five product series expand over the period. Health and group insurance grow faster, retirement also scales materially, while protection and savings rise more steadily.",
+      "fact_groups": [["保障"], ["储蓄"], ["退休"], ["健康"], ["团险"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["digital stp"], ["hong kong"], ["capital ratio"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 5}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 5}]
+    },
+    {
+      "id": "chart-analysis-009",
+      "category": "scenario_analysis",
+      "scope": ["deployment"],
+      "question": "请解读图中5项资本与回报指标在8个情景下的变化，复合压力情景暴露了什么？",
+      "standard_answer": "复合压力下资本比率、流动性Index、自由盈余Index、ROE Index和久期匹配均低于基准，其中自由盈余和ROE相对基准受压更明显。这里是情景间比较，不应表述为时间趋势。",
+      "fact_groups": [["资本比率"], ["流动性index"], ["自由盈余index"], ["roe index"], ["久期匹配"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["recent 3"], ["近期趋势"], ["香港"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 12}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 12}]
+    },
+    {
+      "id": "chart-analysis-010",
+      "category": "categorical_matrix",
+      "scope": ["deployment"],
+      "question": "比较图中6项经营指标在8个市场的差异，并说明这类图能和不能得出什么结论。",
+      "standard_answer": "图中比较活跃代理k、人均件数、APE/人、数字直通、13M继续率和NPS在八个市场的横截面差异。各指标量纲不同，不能求和为市场总产出，也不能仅凭并列位置推断指标间因果关系。",
+      "fact_groups": [["活跃代理k"], ["人均件数"], ["ape/人"], ["数字直通"], ["13m继续率"], ["nps"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["aggregate output"], ["市场总产出为"], ["opat"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 9}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 9}]
+    },
+    {
+      "id": "chart-analysis-011",
+      "category": "named_series_selection",
+      "scope": ["deployment"],
+      "question": "不限定图表标题，只看VONB Margin和Protection Mix，长期与近期信号是否一致？",
+      "standard_answer": "两项指标从24/04到26/03都高于起点，但近期方向并不一致：VONB Margin最近三期均值改善，Protection Mix最近三期均值回落。因此长期改善不能掩盖组合指标的短期走弱。",
+      "fact_groups": [["vonb margin"], ["protection mix"], ["近期", "recent"], ["回落", "weaken", "declin"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["opat"], ["ufsg"], ["市场风险"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 4}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 4}]
+    },
+    {
+      "id": "chart-analysis-012",
+      "category": "financial_series_trend",
+      "scope": ["deployment"],
+      "question": "请综合分析图中3项核心财务系列在4个年度点的方向，不要混入其他页面指标。",
+      "standard_answer": "VONB、OPAT和UFSG从2023A到2026E均上升，VONB相对增幅更高。2026E属于估算点，解读时应与历史实际值区分。",
+      "fact_groups": [["vonb"], ["opat"], ["ufsg"]],
+      "numeric_groups": [],
+      "forbidden_groups": [["digital stp"], ["香港"], ["风险资本占用"]],
+      "evidence_groups": [[{"deck": "deployment", "slide": 2}]],
+      "allowed_evidence": [{"deck": "deployment", "slide": 2}]
+    }
+  ]
+}

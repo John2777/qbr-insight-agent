@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -389,6 +390,56 @@ def _substantive(text: str) -> bool:
     return len(re.sub(r"\s+", "", plain)) >= 12
 
 
+def _normalized_series_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", normalized)
+
+
+def _mentions_series(text: str, name: str) -> bool:
+    """Verify the authoritative source label without maintaining translation aliases."""
+
+    normalized_name = _normalized_series_text(name)
+    return bool(normalized_name and normalized_name in _normalized_series_text(text))
+
+
+def _chart_scope_diagnostics(answer: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    scope = next(
+        (
+            item.get("chart_scope")
+            for item in evidence
+            if isinstance(item.get("chart_scope"), dict) and item["chart_scope"].get("kind") == "chart_analysis"
+        ),
+        None,
+    )
+    if not isinstance(scope, dict):
+        return {"active": False, "outside_scope_series": [], "missing_family_coverage": {}}
+
+    outside = [
+        name
+        for name in scope.get("excluded_document_series_names", [])
+        if isinstance(name, str) and name and _mentions_series(answer, name)
+    ]
+    minimum = scope.get("minimum_family_mentions") or 0
+    missing: dict[str, dict[str, Any]] = {}
+    for family, names in dict(scope.get("family_series") or {}).items():
+        if family not in {"bar", "line"} or not isinstance(names, list) or not names:
+            continue
+        mentioned = [name for name in names if isinstance(name, str) and _mentions_series(answer, name)]
+        if isinstance(minimum, dict):
+            required = min(max(0, int(minimum.get(family) or 0)), len(names))
+        else:
+            required = min(max(0, int(minimum)), len(names))
+        if len(mentioned) < required:
+            missing[str(family)] = {"required": required, "mentioned": mentioned, "available": names}
+    return {
+        "active": True,
+        "outside_scope_series": sorted(set(outside)),
+        "missing_family_coverage": missing,
+        "selected_series_names": scope.get("selected_series_names", []),
+        "no_pairwise_mapping": bool(scope.get("no_pairwise_mapping")),
+    }
+
+
 def markdown_format_integrity(text: str) -> bool:
     """Check paired Markdown delimiters without treating thematic breaks as emphasis."""
 
@@ -434,12 +485,17 @@ class ClaimEvidenceVerifier:
         )
         allowed_facts = numeric_facts(allowed_corpus)
         unsupported = _unsupported_facts(answer, allowed_facts, allowed_corpus)
+        chart_scope = _chart_scope_diagnostics(answer, evidence)
 
         warnings: list[str] = []
         if citation_failed:
             warnings.append("LLM_CITATION_VALIDATION_FAILED")
         if unsupported:
             warnings.append("LLM_NUMERIC_VALIDATION_FAILED")
+        if chart_scope["outside_scope_series"]:
+            warnings.append("LLM_CHART_SCOPE_VALIDATION_FAILED")
+        if chart_scope["missing_family_coverage"]:
+            warnings.append("LLM_CHART_COVERAGE_VALIDATION_FAILED")
 
         diagnostics: dict[str, Any] = {
             "references": sorted(references),
@@ -447,6 +503,7 @@ class ClaimEvidenceVerifier:
             "unsupported_numeric_facts": [fact.diagnostic() for fact in unsupported],
             "evidence_roles": sorted({str(item.get("content_role") or "unknown") for item in evidence}),
             "task_summary": str((task_frame or {}).get("task_summary") or ""),
+            "chart_scope": chart_scope,
             "disposition": "accepted",
         }
         if not warnings:
@@ -461,6 +518,7 @@ class ClaimEvidenceVerifier:
         repaired_references = {int(value) for value in re.findall(r"\[(\d+)\]", repaired)}
         repaired_unsupported = _unsupported_facts(repaired, allowed_facts, allowed_corpus)
         repaired_citations_valid = not evidence or bool(repaired_references and repaired_references <= valid_references)
+        repaired_chart_scope = _chart_scope_diagnostics(repaired, evidence)
         diagnostics["removed_claim_segments"] = removed
         if (
             repaired != answer
@@ -468,6 +526,8 @@ class ClaimEvidenceVerifier:
             and markdown_format_integrity(repaired)
             and repaired_citations_valid
             and not repaired_unsupported
+            and not repaired_chart_scope["outside_scope_series"]
+            and not repaired_chart_scope["missing_family_coverage"]
         ):
             diagnostics["disposition"] = "repaired"
             return VerificationResult(True, tuple(warnings), diagnostics, repaired)

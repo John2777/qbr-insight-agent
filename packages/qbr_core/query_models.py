@@ -50,7 +50,8 @@ class QueryPlan:
         "methodology",
     )
     excluded_content_roles: tuple[str, ...] = ("boilerplate",)
-    needs_visuals: bool = True
+    needs_visuals: bool = False
+    visual_structure: dict[str, Any] = field(default_factory=dict)
     planner_confidence: float = 0.0
     planner: str = "linguistic_fallback"
     warnings: tuple[str, ...] = ()
@@ -72,6 +73,7 @@ class QueryPlan:
             "allowed_content_roles": list(self.allowed_content_roles),
             "excluded_content_roles": list(self.excluded_content_roles),
             "needs_visuals": self.needs_visuals,
+            "visual_structure": self.visual_structure,
             "planner_confidence": self.planner_confidence,
             "planner": self.planner,
             "warnings": list(self.warnings),

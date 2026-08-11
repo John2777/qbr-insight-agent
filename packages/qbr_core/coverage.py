@@ -231,7 +231,11 @@ def _metric_subjects(clause: str, kind: str) -> list[str]:
     return list(dict.fromkeys(subject for subject in subjects if subject))[:8]
 
 
-def build_evidence_contract(question: str) -> tuple[EvidenceFacet, ...]:
+def build_evidence_contract(
+    question: str,
+    *,
+    tool_evidence: Iterable[Any] = (),
+) -> tuple[EvidenceFacet, ...]:
     """Create stable, typed answer requirements from the user's wording.
 
     LLM-generated free-form requirements remain useful for retrieval, but they
@@ -240,6 +244,21 @@ def build_evidence_contract(question: str) -> tuple[EvidenceFacet, ...]:
     """
 
     clauses = [item.strip(" ,，") for item in re.split(r"[?？!！;；。]+", question) if item.strip(" ,，")]
+    clause_kinds = {_kind_for_clause(clause) for clause in clauses}
+    non_chart_requirements = {"driver_attribution", "action", "definition", "source"}
+    tool_rows = [_evidence_view(item, index) for index, item in enumerate(tool_evidence, 1)]
+    if not (clause_kinds & non_chart_requirements) and any(
+        str(row.get("extraction") or "") == "native_chart_analysis_bundle" for row in tool_rows
+    ):
+        return (EvidenceFacet(_facet_id("chart_analysis", "", question), question, "chart_analysis"),)
+    non_calculation_requirements = non_chart_requirements | {"evaluation"}
+    if not (clause_kinds & non_calculation_requirements) and any(
+        str(row.get("extraction") or "") == "native_chart_calculation" for row in tool_rows
+    ):
+        return (
+            EvidenceFacet(_facet_id("chart_calculation", "", question), question, "chart_calculation"),
+        )
+
     facets: list[EvidenceFacet] = []
     for clause in clauses or [question.strip()]:
         kind = _kind_for_clause(clause)
@@ -323,6 +342,10 @@ def _fully_supports(facet: EvidenceFacet, evidence: dict[str, Any]) -> bool:
         return not bool(re.fullmatch(r"[\s\W]*\d[\d\s.,%]*", text))
     if facet.kind == "evaluation":
         return role in {"risk_signal", "management_insight", "table", "chart", "business_fact"}
+    if facet.kind == "chart_analysis":
+        return role == "chart" and evidence.get("extraction") == "native_chart_analysis_bundle"
+    if facet.kind == "chart_calculation":
+        return role == "chart" and evidence.get("extraction") == "native_chart_calculation"
     return bool(text.strip())
 
 

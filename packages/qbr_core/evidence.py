@@ -546,10 +546,26 @@ class EvidencePackBuilder:
     ) -> EvidencePack:
         """Re-evaluate the same contract when a deterministic tool adds evidence."""
 
+        additional = list(evidence)
         coverage = evaluate_evidence_coverage(
-            build_evidence_contract(plan.original_question),
-            [*pack.atoms, *evidence],
+            build_evidence_contract(plan.original_question, tool_evidence=additional),
+            [*pack.atoms, *additional],
         )
         facet_ids = facet_ids_for_evidence(coverage)
         atoms = tuple(replace(atom, facet_ids=facet_ids.get(atom.atom_id, ())) for atom in pack.atoms)
-        return replace(pack, atoms=atoms, coverage=coverage)
+        covered_documents = set(pack.diagnostics.get("covered_document_ids", []))
+        covered_documents.update(str(item.get("document_id")) for item in additional if item.get("document_id"))
+        missing_documents = [document_id for document_id in plan.document_ids if document_id not in covered_documents]
+        diagnostics = {
+            **pack.diagnostics,
+            "covered_document_ids": sorted(covered_documents),
+            "missing_document_ids": missing_documents,
+            "deterministic_evidence_count": len(additional),
+        }
+        return replace(
+            pack,
+            atoms=atoms,
+            coverage=coverage,
+            answerable=pack.answerable or bool(additional),
+            diagnostics=diagnostics,
+        )

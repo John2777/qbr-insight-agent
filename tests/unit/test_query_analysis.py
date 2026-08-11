@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from packages.qbr_core.answering import DeterministicAnswerEngine
-from packages.qbr_core.coverage import build_evidence_contract
+from packages.qbr_core.coverage import build_evidence_contract, evaluate_evidence_coverage
 from packages.qbr_core.evidence import EvidencePackBuilder, infer_facet
 from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
 
@@ -58,6 +58,75 @@ def test_typed_coverage_does_not_treat_fallback_wording_as_a_missing_requirement
     assert pack.missing_facets == ("Use evidence that directly resolves the user's wording",)
     assert pack.coverage.has_gaps is False
     assert pack.coverage.supported_count == 1
+
+
+def test_chart_analysis_bundle_satisfies_one_chart_level_contract() -> None:
+    question = "这张24个月双轴控制图说明了什么？请指出增长结构、质量变化和潜在背离。"
+    tool_evidence = [
+        {
+            "quote": "Chart analytical evidence bundle: aggregate output and recent divergence",
+            "content_role": "chart",
+            "extraction": "native_chart_analysis_bundle",
+            "confidence": 1.0,
+            "evidence_atom_id": "chart_bundle",
+        }
+    ]
+    contract = build_evidence_contract(question, tool_evidence=tool_evidence)
+    coverage = evaluate_evidence_coverage(
+        contract,
+        tool_evidence,
+    )
+
+    assert len(contract) == 1 and contract[0].kind == "chart_analysis"
+    assert coverage.has_gaps is False
+    assert coverage.supported_count == 1
+
+
+def test_chart_calculation_bundle_satisfies_one_typed_contract_without_hiding_business_gaps() -> None:
+    calculation = [
+        {
+            "quote": "Current: Alpha=15; Baseline: Alpha=10; relative change=50%",
+            "content_role": "chart",
+            "extraction": "native_chart_calculation",
+            "confidence": 1.0,
+            "evidence_atom_id": "calculation",
+        }
+    ]
+    simple = build_evidence_contract("Alpha Current 比 Baseline 增加多少？", tool_evidence=calculation)
+    compound = build_evidence_contract(
+        "Alpha Current 比 Baseline 增加多少？为什么增长？",
+        tool_evidence=calculation,
+    )
+
+    simple_coverage = evaluate_evidence_coverage(simple, calculation)
+
+    assert len(simple) == 1 and simple[0].kind == "chart_calculation"
+    assert simple_coverage.supported_count == 1 and not simple_coverage.has_gaps
+    assert any(facet.kind == "driver_attribution" for facet in compound)
+
+
+def test_deterministic_evidence_updates_document_coverage_even_without_retrieved_atoms() -> None:
+    plan = deterministic_plan("请分析这张图", ["doc"])
+    empty = EvidencePackBuilder().build(plan, [])
+
+    updated = EvidencePackBuilder.with_additional_evidence(
+        plan,
+        empty,
+        [
+            {
+                "document_id": "doc",
+                "quote": "Chart analytical evidence bundle",
+                "content_role": "chart",
+                "extraction": "native_chart_analysis_bundle",
+                "confidence": 1.0,
+            }
+        ],
+    )
+
+    assert updated.answerable
+    assert updated.diagnostics["covered_document_ids"] == ["doc"]
+    assert updated.diagnostics["missing_document_ids"] == []
+    assert updated.diagnostics["deterministic_evidence_count"] == 1
 
 
 def test_multi_part_growth_question_has_stable_typed_facets_and_specific_gap() -> None:

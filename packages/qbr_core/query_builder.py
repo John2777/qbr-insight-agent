@@ -51,6 +51,18 @@ def _focused_terms(question: str) -> str:
     return " ".join(token for token in tokens if token.casefold() not in stopwords)
 
 
+def _references_visual(question: str) -> bool:
+    """Minimal model-free fallback based on visual grammar, not domain vocabulary."""
+
+    return bool(
+        re.search(
+            r"(?:图(?:表)?|柱(?:状|形)?图|折线|坐标轴|系列|charts?|graphs?|plots?|axes|axis|series|bars?|columns?|lines?)",
+            question,
+            flags=re.I,
+        )
+    )
+
+
 def _linguistic_expansions(question: str) -> list[RetrievalQuery]:
     """Add vocabulary bridges without deciding what kind of question this is."""
     folded = question.casefold()
@@ -112,6 +124,7 @@ def linguistic_plan(question: str, document_ids: Iterable[str] = ()) -> QueryPla
         retrieval_queries=queries,
         hard_constraints=constraints,
         evidence_requirements=requirements,
+        needs_visuals=_references_visual(question),
         planner_confidence=0.35,
     )
 

@@ -26,6 +26,17 @@ def test_dataset_has_50_well_formed_cases() -> None:
     assert sum(case["category"] == "abstention" for case in cases) >= 2
 
 
+def test_chart_analysis_regression_dataset_has_business_content_and_forbidden_substitutions() -> None:
+    dataset = json.loads((ROOT / "benchmarks/qbr_chart_analysis/cases.json").read_text(encoding="utf-8"))
+    cases = dataset["cases"]
+    assert dataset["dataset"] == "qbr-chart-analysis"
+    assert len(cases) >= 12
+    assert all(case["scope"] == ["deployment"] for case in cases)
+    assert all(case["fact_groups"] and case["forbidden_groups"] for case in cases)
+    assert all(case["allowed_evidence"] == case["evidence_groups"][0] for case in cases)
+    assert len({case["allowed_evidence"][0]["slide"] for case in cases}) >= 6
+
+
 def test_normalized_alias_coverage_handles_full_width_and_commas() -> None:
     answer = "2025年 VONB 为 US$5,516m，增长１５%。"
     assert normalize("１５％") == normalize("15%")

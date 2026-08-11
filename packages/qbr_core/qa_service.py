@@ -483,6 +483,8 @@ class QAApplicationService:
                 "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
                 "verified_calculation": answer_result.diagnostics.get("verified_calculation"),
                 "verified_calculation_facts": answer_result.diagnostics.get("verified_calculation_facts", []),
+                "verified_calculation_kind": answer_result.diagnostics.get("verified_calculation_kind"),
+                "chart_scope": answer_result.diagnostics.get("chart_scope"),
                 "verification": verification_info,
                 "conversation_context": {
                     **context.diagnostics,
