@@ -165,7 +165,8 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
                 },
                 "planner_confidence": 0.93,
             }
-        )
+        ),
+        output_tokens=120,
     )
     plan = QueryPlannerAgent(model).plan("How did sales perform in Q2 2025?")
     corpus = " ".join(item.text for item in plan.retrieval_queries)
@@ -182,6 +183,9 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
         "point_counts": [24],
         "chart_families": ["bar", "line"],
     }
+    assert plan.diagnostics["input_tokens"] == 10
+    assert plan.diagnostics["output_tokens"] == 120
+    assert plan.diagnostics["total_tokens"] == 130
 
 
 def test_planner_prompt_uses_structured_summary_only_for_reference_resolution() -> None:
@@ -242,7 +246,9 @@ def test_invalid_planner_output_falls_back_without_inventing_a_category() -> Non
     assert plan.diagnostics == {
         "content_length": 0,
         "finish_reason": "length",
+        "input_tokens": 10,
         "output_tokens": 1202,
+        "total_tokens": 1212,
         "reasoning_tokens": 1200,
     }
 
@@ -337,6 +343,12 @@ def test_end_to_end_metadata_exposes_task_frame_not_intent_taxonomy(tmp_path: Pa
     assert plan["task_summary"] == "当前文档里有哪些潜在问题？"
     assert "intent" not in plan and "active_intents" not in plan
     assert message["metadata"]["answer_routing"]["strategy"] == "semantic_grounding"
+    assert message["metadata"]["answer_metrics"]["duration_ms"] >= 0
+    assert message["metadata"]["answer_metrics"]["token_usage"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
     assert "文档中的核心图表指标" not in message["content"]
     assert not message["content"].startswith("编号证据")
     assert "可核验证据" in message["content"]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 import threading
 from typing import Any
@@ -16,28 +15,21 @@ from .errors import Conflict, InvalidState, ResourceNotFound
 from .ids import new_id
 from .lease import LeaseCoordinator
 from .llm import EvidenceQAAgent
+from .qa_runtime import (
+    answer_deltas as _answer_deltas,
+)
+from .qa_runtime import (
+    answer_metrics,
+    document_vocabulary,
+    metadata_with_answer_metrics,
+)
 from .query_planning import QueryPlannerAgent
 from .retrieval import EvidenceRetriever
 from .run_warnings import describe_warning
+from .service_support import _loads
 from .skill_registry import SkillDescriptor, SkillRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _answer_deltas(answer: str, chunk_size: int = 48) -> tuple[str, ...]:
-    """Split an answer without dropping long runs of non-whitespace text."""
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be positive")
-    return tuple(answer[offset : offset + chunk_size] for offset in range(0, len(answer), chunk_size)) or ("",)
-
-
-def _loads(value: str | None, default: Any) -> Any:
-    if not value:
-        return default
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
 
 
 class QAApplicationService:
@@ -132,7 +124,16 @@ class QAApplicationService:
             message_data = []
             for message in messages:
                 item = dict(message)
-                item["metadata"] = _loads(item.pop("metadata_json", None), {})
+                metadata = _loads(item.pop("metadata_json", None), {})
+                message_run = (
+                    conn.execute(
+                        "SELECT created_at,completed_at,model_json FROM runs WHERE id=?",
+                        (message["run_id"],),
+                    ).fetchone()
+                    if message["run_id"]
+                    else None
+                )
+                item["metadata"] = metadata_with_answer_metrics(metadata, message_run)
                 citations = conn.execute("SELECT * FROM citations WHERE message_id=? ORDER BY claim_no", (message["id"],)).fetchall()
                 item["citations"] = [self._citation_public(dict(citation), conn) for citation in citations]
                 message_data.append(item)
@@ -412,7 +413,7 @@ class QAApplicationService:
                 history=history,
                 conversation_summary=context.summary,
                 document_ids=document_ids,
-                document_vocabulary=self._document_vocabulary(str(run["workspace_id"]), document_ids),
+                document_vocabulary=document_vocabulary(self.db, str(run["workspace_id"]), document_ids),
                 run_id=run_id,
             )
             with self.db.transaction(immediate=True) as conn:
@@ -527,6 +528,18 @@ class QAApplicationService:
         message_metadata: dict[str, Any] | None = None,
     ) -> None:
         run_id = str(run["id"])
+        completed_at = utc_now()
+        metadata = dict(message_metadata or {})
+        query_plan = metadata.get("query_plan") if isinstance(metadata.get("query_plan"), dict) else {}
+        planner_diagnostics = (
+            query_plan.get("diagnostics") if isinstance(query_plan.get("diagnostics"), dict) else {}
+        )
+        metadata["answer_metrics"] = answer_metrics(
+            created_at=str(run["created_at"]),
+            completed_at=completed_at,
+            planner_diagnostics=planner_diagnostics,
+            answer_model=model_info,
+        )
         if warnings:
             severity_rank = {"info": 0, "warning": 1, "degraded": 2, "error": 3}
             max_severity = max((describe_warning(code).severity for code in warnings), key=severity_rank.__getitem__)
@@ -540,7 +553,7 @@ class QAApplicationService:
                         "max_severity": max_severity,
                         "model_status": model_info.get("status"),
                         "answer_source": model_info.get("answer_source"),
-                        "verification_disposition": (message_metadata or {}).get("verification", {}).get("disposition"),
+                        "verification_disposition": metadata.get("verification", {}).get("disposition"),
                         "planner": model_info.get("planner"),
                     },
                     separators=(",", ":"),
@@ -549,7 +562,7 @@ class QAApplicationService:
         with self.db.transaction(immediate=True) as conn:
             conn.execute(
                 "UPDATE messages SET content=?,status='completed',metadata_json=? WHERE id=?",
-                (answer, self.db.json(message_metadata or {}), run["assistant_message_id"]),
+                (answer, self.db.json(metadata), run["assistant_message_id"]),
             )
             for index, evidence_item in enumerate(evidence, 1):
                 citation_id = new_id("cit")
@@ -578,34 +591,9 @@ class QAApplicationService:
             conn.execute(
                 """UPDATE runs SET status='completed',warning_json=?,model_json=?,completed_at=?,
                      lease_owner=NULL,lease_expires_at=NULL WHERE id=?""",
-                (self.db.json(warnings), self.db.json(model_info), utc_now(), run_id),
+                (self.db.json(warnings), self.db.json(model_info), completed_at, run_id),
             )
             self._run_event(conn, run_id, "completed", {"message_id": run["assistant_message_id"]})
-
-    def _document_vocabulary(self, workspace_id: str, document_ids: list[str]) -> list[str]:
-        scope_sql = ""
-        scope_args: list[Any] = []
-        if document_ids:
-            placeholders = ",".join("?" for _ in document_ids)
-            scope_sql = f" AND d.id IN ({placeholders})"
-            scope_args.extend(document_ids)
-        with self.db.read() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT d.title document_title,s.title slide_title
-                FROM slides s JOIN document_versions dv ON dv.id=s.document_version_id
-                JOIN documents d ON d.id=dv.document_id
-                WHERE d.workspace_id=? AND d.deleted_at IS NULL
-                  AND s.parser_run_id=dv.active_parser_run_id {scope_sql}
-                ORDER BY d.updated_at DESC,s.slide_no LIMIT 80
-                """,
-                (workspace_id, *scope_args),
-            ).fetchall()
-        terms: list[str] = []
-        for row in rows:
-            for value in (row["document_title"], row["slide_title"]):
-                terms.extend(re.findall(r"[A-Za-z][A-Za-z0-9&/_-]{1,40}|[\u4e00-\u9fff]{2,16}", str(value or "")))
-        return list(dict.fromkeys(terms))[:120]
 
     def _run_event(self, conn: sqlite3.Connection, run_id: str, event_type: str, data: dict[str, Any]) -> None:
         conn.execute(
@@ -639,7 +627,8 @@ class QAApplicationService:
             result["model"] = _loads(result.pop("model_json"), {})
             if message:
                 public_message = dict(message)
-                public_message["metadata"] = _loads(public_message.pop("metadata_json", None), {})
+                metadata = _loads(public_message.pop("metadata_json", None), {})
+                public_message["metadata"] = metadata_with_answer_metrics(metadata, row)
                 result["message"] = public_message
             else:
                 result["message"] = None

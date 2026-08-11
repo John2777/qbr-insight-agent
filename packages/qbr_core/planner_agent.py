@@ -56,10 +56,17 @@ def _response_diagnostics(message: Any, text: str) -> dict[str, Any]:
         else {}
     )
     output_details = usage.get("output_token_details") if isinstance(usage.get("output_token_details"), dict) else {}
+    input_tokens = usage.get("input_tokens") or token_usage.get("prompt_tokens")
+    output_tokens = usage.get("output_tokens") or token_usage.get("completion_tokens")
+    total_tokens = usage.get("total_tokens") or token_usage.get("total_tokens")
+    if total_tokens is None and isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        total_tokens = input_tokens + output_tokens
     return {
         "content_length": len(text),
         "finish_reason": metadata.get("finish_reason"),
-        "output_tokens": usage.get("output_tokens") or token_usage.get("completion_tokens"),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
         "reasoning_tokens": output_details.get("reasoning") or completion_details.get("reasoning_tokens"),
     }
 
@@ -168,7 +175,7 @@ class QueryPlannerAgent:
                 warnings=("QUERY_PLANNER_OUTPUT_INVALID",),
                 diagnostics=_response_diagnostics(message, message_text),
             )
-        return self._semantic_plan(baseline, payload)
+        return self._semantic_plan(baseline, payload, _response_diagnostics(message, message_text))
 
     @staticmethod
     def _planner_prompt(
@@ -194,7 +201,11 @@ class QueryPlannerAgent:
         )
 
     @staticmethod
-    def _semantic_plan(baseline: QueryPlan, payload: dict[str, Any]) -> QueryPlan:
+    def _semantic_plan(
+        baseline: QueryPlan,
+        payload: dict[str, Any],
+        response_diagnostics: dict[str, Any] | None = None,
+    ) -> QueryPlan:
         model_queries: list[RetrievalQuery] = []
         raw_queries = payload.get("retrieval_queries")
         if isinstance(raw_queries, list):
@@ -242,5 +253,6 @@ class QueryPlannerAgent:
             diagnostics={
                 "model_query_count": len(model_queries),
                 "language_guard_query_count": max(0, len(baseline.retrieval_queries) - 1),
+                **(response_diagnostics or {}),
             },
         )

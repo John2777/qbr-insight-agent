@@ -35,7 +35,19 @@ describe("ChatPage", () => {
       ...emptyConversation,
       messages: [
         { id: "msg_user", role: "user", content: "What potential issues are in the current document?", status: "completed", citations: [] },
-        { id: "msg_answer", role: "assistant", content: "Focus on execution variance.", status: "completed", citations: [] },
+        {
+          id: "msg_answer",
+          role: "assistant",
+          content: "Focus on execution variance.",
+          status: "completed",
+          citations: [],
+          metadata: {
+            answer_metrics: {
+              duration_ms: 8420,
+              token_usage: { input_tokens: 900, output_tokens: 334, total_tokens: 1234 },
+            },
+          },
+        },
       ],
     };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
@@ -74,6 +86,10 @@ describe("ChatPage", () => {
 
     resolveMessagePost({ run_id: "run_1", events_url: "/events/run_1" });
     await waitFor(() => expect(screen.getByText("Focus on execution variance.")).toBeInTheDocument());
+    expect(screen.getByLabelText("Answer metrics")).toHaveTextContent("Latency 8.4 s");
+    expect(screen.getByLabelText("Answer metrics")).toHaveTextContent("1,234 tokens");
+    expect(screen.getByLabelText("Answer metrics")).toHaveTextContent("900 in");
+    expect(screen.getByLabelText("Answer metrics")).toHaveTextContent("334 out");
     expect(screen.queryByText("Start with verifiable evidence")).not.toBeInTheDocument();
     expect(scrollToMock.mock.calls.at(-1)?.[0]).toMatchObject({ top: expect.any(Number) });
   });

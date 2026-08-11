@@ -6,7 +6,23 @@ import { SlideCanvas } from "../components/SlideCanvas";
 import { AssistantAnswer } from "../components/AssistantAnswer";
 import { MessageCopyButton } from "../components/MessageCopyButton";
 import { notifyConversationsChanged } from "../conversationEvents";
-import type { Citation, Conversation, DocumentItem, SlideDetail } from "../types";
+import type { Citation, Conversation, DocumentItem, Message, SlideDetail } from "../types";
+
+function AnswerMetrics({ metrics }: { metrics: NonNullable<Message["metadata"]>["answer_metrics"] }) {
+  if (!metrics) return null;
+  const duration = metrics.duration_ms < 1000
+    ? `${Math.round(metrics.duration_ms)} ms`
+    : `${(metrics.duration_ms / 1000).toFixed(metrics.duration_ms < 10_000 ? 1 : 0)} s`;
+  const number = new Intl.NumberFormat("en-US");
+  return (
+    <div className="message-metrics" aria-label="Answer metrics">
+      <span>Latency {duration}</span>
+      <span>{number.format(metrics.token_usage.total_tokens)} tokens</span>
+      <span>{number.format(metrics.token_usage.input_tokens)} in</span>
+      <span>{number.format(metrics.token_usage.output_tokens)} out</span>
+    </div>
+  );
+}
 
 export function ChatPage() {
   const { conversationId } = useParams(); const navigate = useNavigate(); const [params] = useSearchParams();
@@ -91,7 +107,7 @@ export function ChatPage() {
   return (
     <section className="chat-page">
       <div className="chat-column"><header className="chat-header"><div><span className="eyebrow">EVIDENCE QA</span><h1>{conversation?.title || "Ask QBR"}</h1></div><select aria-label="Document scope" value={selected[0] ?? ""} disabled={!!conversationId} onChange={(e) => setSelected(e.target.value ? [e.target.value] : [])}><option value="">All available documents</option>{documents.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}</select></header>
-        <div className="messages" ref={messagesRef} onScroll={handleMessageScroll}>{showEmpty && <div className="chat-empty"><span>⌁</span><h2>Start with verifiable evidence</h2><p>Try “What does VONB mean?” or “How did margin change from Q1 to Q3?”</p></div>}{visibleMessages.map((message) => <article key={message.id} className={`message ${message.role}`}><div className="message-role">{message.role === "user" ? "You" : "QBR Agent"}</div><div className="message-body">{message.role === "assistant" && message.content ? <AssistantAnswer content={message.content} citations={message.citations ?? []} showVisuals={message.metadata?.show_visuals ?? true} onCitation={(item) => void showEvidence(item)}/> : message.content || (message.status === "running" ? "Preparing answer…" : "")}{message.citations?.length > 0 && <div className="citation-row">{message.citations.map((item) => <button onClick={() => void showEvidence(item)} key={item.id}>{item.label} · Slide {item.slide_no}</button>)}</div>}</div>{message.content?.trim() && <div className="message-actions"><MessageCopyButton content={message.content} kind={message.role === "user" ? "question" : "answer"}/></div>}</article>)}{showPendingQuestion && <article className="message user pending"><div className="message-role">You</div><div className="message-body">{pendingQuestion}</div></article>}{(streamingAnswer || stage || sending) && <article className="message assistant streaming" aria-live="polite"><div className="message-role">QBR Agent · LIVE</div><div className="message-body">{streamingAnswer || stage || "Preparing answer…"}<span className="stream-cursor">▍</span></div></article>}</div>
+        <div className="messages" ref={messagesRef} onScroll={handleMessageScroll}>{showEmpty && <div className="chat-empty"><span>⌁</span><h2>Start with verifiable evidence</h2><p>Try “What does VONB mean?” or “How did margin change from Q1 to Q3?”</p></div>}{visibleMessages.map((message) => <article key={message.id} className={`message ${message.role}`}><div className="message-role">{message.role === "user" ? "You" : "QBR Agent"}</div><div className="message-body">{message.role === "assistant" && message.content ? <AssistantAnswer content={message.content} citations={message.citations ?? []} showVisuals={message.metadata?.show_visuals ?? true} onCitation={(item) => void showEvidence(item)}/> : message.content || (message.status === "running" ? "Preparing answer…" : "")}{message.citations?.length > 0 && <div className="citation-row">{message.citations.map((item) => <button onClick={() => void showEvidence(item)} key={item.id}>{item.label} · Slide {item.slide_no}</button>)}</div>}</div>{message.role === "assistant" && <AnswerMetrics metrics={message.metadata?.answer_metrics}/>} {message.content?.trim() && <div className="message-actions"><MessageCopyButton content={message.content} kind={message.role === "user" ? "question" : "answer"}/></div>}</article>)}{showPendingQuestion && <article className="message user pending"><div className="message-role">You</div><div className="message-body">{pendingQuestion}</div></article>}{(streamingAnswer || stage || sending) && <article className="message assistant streaming" aria-live="polite"><div className="message-role">QBR Agent · LIVE</div><div className="message-body">{streamingAnswer || stage || "Preparing answer…"}<span className="stream-cursor">▍</span></div></article>}</div>
         {error && <div className="alert error" role="alert">{error}</div>}
         <form className="composer" onSubmit={submit}><textarea aria-label="Question" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={documents.length ? "Ask about a metric, trend, gap, or driver…" : "Upload and parse a document first"} disabled={!documents.length || sending} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}/><button disabled={!question.trim() || sending}>{sending ? "Searching…" : "Send"}</button><small>Answers use only evidence from the selected documents; structured tools calculate key figures.</small></form>
       </div>

@@ -92,6 +92,14 @@ export type Message = {
     show_visuals?: boolean;
     knowledge_source?: string;
     pipeline_version?: string;
+    answer_metrics?: {
+      duration_ms: number;
+      token_usage: {
+        input_tokens: number;
+        output_tokens: number;
+        total_tokens: number;
+      };
+    };
   };
 };
 
