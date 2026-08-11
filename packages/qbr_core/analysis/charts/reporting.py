@@ -45,8 +45,34 @@ def _fact(facts: list[dict[str, Any]], operation: str) -> dict[str, Any] | None:
     return next((item for item in facts if item.get("operation") == operation), None)
 
 
+def _percent(value: float | None, *, unavailable: str) -> str:
+    return unavailable if value is None else f"{value:+.1f}%"
+
+
+def _trend_detail(item: Any, *, chinese: bool) -> str:
+    measures: list[str] = []
+    if item.relative_change_percent is not None:
+        measures.append(("较起点" if chinese else "vs start ") + f"{item.relative_change_percent:+.1f}%")
+    if item.year_over_year_change_percent is not None:
+        measures.append(("同比" if chinese else "YoY ") + f"{item.year_over_year_change_percent:+.1f}%")
+    if item.recent_change_percent is not None:
+        measures.append(
+            ("近3期均值" if chinese else "recent 3 vs prior 3 ") + f"{item.recent_change_percent:+.1f}%"
+        )
+    separator = "、" if chinese else ", "
+    return item.name + (f"（{separator.join(measures)}）" if measures else "")
+
+
+def _direction_counts(items: list[Any]) -> tuple[list[Any], list[Any]]:
+    comparable = [item for item in items if item.relative_change_percent is not None]
+    return (
+        [item for item in comparable if item.relative_change_percent > 0],
+        [item for item in comparable if item.relative_change_percent < 0],
+    )
+
+
 def render_chart_fallback(question: str, summaries: list[Any], facts: list[dict[str, Any]]) -> str:
-    """Render computed chart facts without adding business causality or directionality."""
+    """Render a dense, evidence-bounded analysis from generic chart statistics."""
 
     chinese = bool(re.search(r"[\u4e00-\u9fff]", question))
     bars = [item for item in summaries if item.family == "bar"]
@@ -62,6 +88,7 @@ def render_chart_fallback(question: str, summaries: list[Any], facts: list[dict[
         for item in lines
         if item not in weak and item.category_mode == "temporal" and (item.year_over_year_change_percent or 0) >= 0
     ]
+    rising_bars, falling_bars = _direction_counts([item for item in bars if item.category_mode == "temporal"])
 
     if chinese:
         output = ["基于目标图表的原生数据，可以确认：", "", "- 图表构成：" + _memberships(summaries, chinese=True) + "。[1]"]
@@ -69,13 +96,38 @@ def render_chart_fallback(question: str, summaries: list[Any], facts: list[dict[
             shares = dict(aggregate.get("latest_shares_percent") or {})
             leaders = sorted(shares.items(), key=lambda item: item[1], reverse=True)[:2]
             recent = aggregate.get("recent_change_percent")
+            relative = aggregate.get("relative_change_percent")
+            yoy = aggregate.get("year_over_year_change_percent")
+            aggregate_direction = "扩张" if isinstance(relative, int | float) and relative > 0 else "收缩"
+            if weak:
+                quality_signal = f"{len(lines)}项折线中{len(rising)}项总体上行、{len(weak)}项近期走弱，折线信号并不同步"
+            elif rising:
+                quality_signal = f"{len(rising)}项折线总体上行"
+            else:
+                quality_signal = "折线信号未形成一致方向"
+            output.append(f"- 核心判断：柱状合计总体{aggregate_direction}，但{quality_signal}；因此应把规模变化与其他指标变化分层解读。[1]")
             output.append(
-                f"- 产出结构：合计从{aggregate['start_period']}的{_number(float(aggregate['start_value']))}"
+                f"- 规模节奏：合计从{aggregate['start_period']}的{_number(float(aggregate['start_value']))}"
                 f"变为{aggregate['latest_period']}的{_number(float(aggregate['latest_value']))}，"
-                f"最近3期均值较此前3期变化{'不适用' if recent is None else f'{float(recent):.1f}%'}。"
-                + ("最新占比最高的是" + "、".join(f"{name}（{share:.1f}%）" for name, share in leaders) + "。" if leaders else "")
-                + "[1]"
+                f"累计变化{_percent(float(relative) if relative is not None else None, unavailable='不适用')}、"
+                f"同比{_percent(float(yoy) if yoy is not None else None, unavailable='不适用')}、"
+                f"最近3期均值较此前3期{_percent(float(recent) if recent is not None else None, unavailable='不适用')}。[1]"
             )
+            if leaders:
+                output.append(
+                    "- 最新结构：占比最高的是"
+                    + "、".join(f"{name}（{share:.1f}%）" for name, share in leaders)
+                    + f"，前两项合计{sum(float(share) for _, share in leaders):.1f}%。[1]"
+                )
+        if rising_bars or falling_bars:
+            strongest = sorted(
+                rising_bars,
+                key=lambda item: item.relative_change_percent if item.relative_change_percent is not None else -math.inf,
+                reverse=True,
+            )[:2]
+            breadth = f"{len(rising_bars)}/{len(rising_bars) + len(falling_bars)}个柱状系列高于起点"
+            leaders = "；累计增幅领先的是" + "、".join(_trend_detail(item, chinese=True) for item in strongest) if strongest else ""
+            output.append(f"- 增长广度：{breadth}{leaders}。[1]")
         if composition:
             segments = dict(composition.get("segments") or {})
             largest = dict(composition.get("largest_segment") or {})
@@ -93,16 +145,24 @@ def render_chart_fallback(question: str, summaries: list[Any], facts: list[dict[
                 f"{decline.get('from')}→{decline.get('to')}（{_number(float(decline.get('delta') or 0))}）。[1]"
             )
         if rising:
-            output.append("- 总体上行的折线系列：" + "、".join(item.name for item in rising) + "。[1]")
+            output.append("- 折线中的改善信号：" + "；".join(_trend_detail(item, chinese=True) for item in rising) + "。[1]")
         if weak:
             details = [
-                f"{item.name}最近3期均值较此前3期{item.recent_change_percent:.1f}%"
-                if item.recent_change_percent is not None and item.recent_change_percent < 0
-                else f"{item.name}较{item.maximum_period}峰值回撤{abs(item.latest_vs_peak_percent or 0):.1f}%"
+                _trend_detail(item, chinese=True)
+                + (
+                    f"，较{item.maximum_period}峰值回撤{abs(item.latest_vs_peak_percent):.1f}%"
+                    if item.latest_vs_peak_percent is not None and item.latest_vs_peak_percent < 0
+                    else ""
+                )
                 for item in weak
             ]
-            prefix = "- 需要关注的近期方向背离：总产出仍增长，但" if aggregate else "- 近期走弱的折线系列："
-            output.append(prefix + "；".join(details) + "。这是描述性信号，不代表因果关系。[1]")
+            prefix = "- 需要关注的分化：总产出仍增长，但" if aggregate else "- 近期走弱的折线系列："
+            output.append(prefix + "；".join(details) + "。[1]")
+        if aggregate and weak:
+            output.append(
+                "- 有边界的推断：规模扩张尚未获得所有折线指标同步确认，可视为需要进一步拆解的分化信号；"
+                "仅凭同图共变无法确定原因，需补充系列口径、分组明细及驱动数据验证。[1]"
+            )
         if temporal and not aggregate and not lines:
             output.append(
                 "- 时间变化："
@@ -136,17 +196,42 @@ def render_chart_fallback(question: str, summaries: list[Any], facts: list[dict[
     if aggregate:
         shares = dict(aggregate.get("latest_shares_percent") or {})
         leaders = sorted(shares.items(), key=lambda item: item[1], reverse=True)[:2]
+        relative = aggregate.get("relative_change_percent")
+        yoy = aggregate.get("year_over_year_change_percent")
+        recent = aggregate.get("recent_change_percent")
+        direction = "expanded" if isinstance(relative, int | float) and relative > 0 else "contracted"
+        output.append(
+            f"- Core finding: aggregate bar/column output {direction}, while {len(rising)} line series generally rose and "
+            f"{len(weak)} weakened recently; scale and line signals should be read separately. [1]"
+        )
         output.append(
             f"- Output moved from {_number(float(aggregate['start_value']))} in {aggregate['start_period']} to "
-            f"{_number(float(aggregate['latest_value']))} in {aggregate['latest_period']}. Latest leaders were "
-            + ", ".join(f"{name} ({share:.1f}%)" for name, share in leaders)
-            + ". [1]"
+            f"{_number(float(aggregate['latest_value']))} in {aggregate['latest_period']} "
+            f"(cumulative {_percent(float(relative) if relative is not None else None, unavailable='n/a')}, "
+            f"YoY {_percent(float(yoy) if yoy is not None else None, unavailable='n/a')}, "
+            f"recent {_percent(float(recent) if recent is not None else None, unavailable='n/a')}). [1]"
+        )
+        if leaders:
+            output.append(
+                "- Latest concentration: "
+                + ", ".join(f"{name} ({share:.1f}%)" for name, share in leaders)
+                + f"; top two combined {sum(float(share) for _, share in leaders):.1f}%. [1]"
+            )
+    if rising_bars or falling_bars:
+        output.append(
+            f"- Growth breadth: {len(rising_bars)}/{len(rising_bars) + len(falling_bars)} bar series were above "
+            "their starting levels. [1]"
         )
     if rising:
-        output.append("- Generally rising line series: " + ", ".join(item.name for item in rising) + ". [1]")
+        output.append("- Improving line signals: " + "; ".join(_trend_detail(item, chinese=False) for item in rising) + ". [1]")
     if weak:
         output.append(
-            "- Recently weaker line series: " + ", ".join(item.name for item in weak) + ". This is descriptive, not causal. [1]"
+            "- Divergent line signals: " + "; ".join(_trend_detail(item, chinese=False) for item in weak) + ". [1]"
+        )
+    if aggregate and weak:
+        output.append(
+            "- Bounded inference: scale growth is not confirmed by every line indicator. This is descriptive "
+            "divergence, not causality; definitions and disaggregated driver data are needed to test explanations. [1]"
         )
     if categorical and not composition and not path:
         output.append("- Boundary: the x-axis is categorical or scenario-based, not a timeline. [1]")

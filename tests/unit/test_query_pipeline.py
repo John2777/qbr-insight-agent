@@ -222,6 +222,35 @@ def test_llm_planner_accepts_multi_part_goal_without_collapsing_to_one_category(
     assert not hasattr(plan, "active_intents")
 
 
+def test_llm_planner_realigns_creation_drift_for_existing_chart_analysis() -> None:
+    model = PlannerModel(
+        json.dumps(
+            {
+                "canonical_question": "设计一张五组柱线双轴图",
+                "task_summary": "创建并设计双轴监控图方案。",
+                "answer_brief": "说明如何绘制左右轴并设计图例。",
+                "operations": ["设计坐标轴", "生成图表", "假设可能的关联"],
+                "evidence_requirements": ["图表设计规范"],
+                "retrieval_queries": [
+                    {"text": "双轴图 设计 绘制规范", "kind": "design_hypothesis"},
+                    {"text": "现有图表 五组柱线 趋势 异常", "kind": "analysis_hypothesis"},
+                ],
+                "needs_visuals": True,
+            }
+        )
+    )
+
+    plan = QueryPlannerAgent(model).plan("请解读五组柱状与五组折线构成的现有双轴图，分析并推理")
+    query_corpus = " ".join(item.text for item in plan.retrieval_queries)
+
+    assert plan.task_summary == plan.original_question
+    assert plan.operations == ("识别用户指定的现有证据", "比较结构、变化与异常", "形成有依据的推断并说明验证边界")
+    assert "设计 绘制规范" not in query_corpus
+    assert "现有图表" in query_corpus
+    assert plan.warnings == ()
+    assert plan.diagnostics["action_realigned"] is True
+
+
 def test_planner_provider_failure_uses_non_classifying_language_fallback(caplog: LogCaptureFixture) -> None:
     plan = QueryPlannerAgent(PlannerModel(RuntimeError("offline")), provider="test", model_name="planner").plan(
         "当前文档有哪些潜在问题？", run_id="run_planner_failure"

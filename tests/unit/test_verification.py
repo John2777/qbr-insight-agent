@@ -198,3 +198,78 @@ def test_verifier_accepts_normalized_source_series_names() -> None:
 
     assert result.accepted
     assert result.warnings == ()
+
+
+def test_verifier_ignores_nested_labels_and_natural_language_compounds() -> None:
+    evidence = _chart_bundle_evidence()
+    scope = evidence[0]["chart_scope"]
+    assert isinstance(scope, dict)
+    scope["excluded_document_series_names"] = ["VONB", "数字直通", "产品组合", "保障", "储蓄"]
+    answer = (
+        "香港和中国内地产出提高；VONB Margin与Protection Mix出现分化。"
+        "数字直通处理率的表述、产品组合和销售渠道、保障型与储蓄型等原因都需要另行验证。[1]"
+    )
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted
+    assert result.warnings == ()
+    assert result.diagnostics["chart_scope"]["outside_scope_series"] == []
+
+
+def test_verifier_still_rejects_explicit_cjk_excluded_series_mentions() -> None:
+    evidence = _chart_bundle_evidence()
+    scope = evidence[0]["chart_scope"]
+    assert isinstance(scope, dict)
+    scope["excluded_document_series_names"] = ["保障"]
+    answer = "香港和中国内地产出提高，VONB Margin与Protection Mix之外还引用了保障。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert not result.accepted
+    assert result.diagnostics["chart_scope"]["outside_scope_series"] == ["保障"]
+
+
+def test_verifier_repairs_unbounded_causal_claims_for_descriptive_charts() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = (
+        "香港和中国内地产出提高，VONB Margin与Protection Mix出现分化。[1]\n"
+        "产出增长主要依赖人员扩张驱动。[1]\n"
+        "这些序列只是同图共变，不代表因果，需要分组明细数据验证。[1]"
+    )
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted
+    assert result.repaired_answer == (
+        "香港和中国内地产出提高，VONB Margin与Protection Mix出现分化。[1]\n"
+        "这些序列只是同图共变，不代表因果，需要分组明细数据验证。[1]"
+    )
+    assert "LLM_CHART_INFERENCE_VALIDATION_FAILED" in result.warnings
+    assert result.diagnostics["unsupported_chart_inferences"] == ["产出增长主要依赖人员扩张驱动。[1]"]
+
+
+def test_verifier_accepts_bounded_noncausal_chart_inference() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = (
+        "香港和中国内地产出提高，VONB Margin与Protection Mix出现分化；"
+        "这只是共变，不代表因果，需要分组明细数据验证。[1]"
+    )
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted
+    assert result.warnings == ()
+
+
+def test_verifier_accepts_explicit_validation_boundary_with_causal_vocabulary() -> None:
+    evidence = _chart_bundle_evidence()
+    answer = (
+        "香港和中国内地产出提高，VONB Margin与Protection Mix出现分化。[1]\n"
+        "图表未声明柱线之间的因果映射，需进一步查阅分组明细数据以验证具体驱动因素。[1]"
+    )
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted
+    assert result.warnings == ()

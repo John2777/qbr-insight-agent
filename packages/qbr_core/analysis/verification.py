@@ -403,6 +403,90 @@ def _mentions_series(text: str, name: str) -> bool:
     return bool(normalized_name and normalized_name in _normalized_series_text(text))
 
 
+def _series_pattern(name: str) -> re.Pattern[str] | None:
+    """Compile a separator-tolerant source-label pattern without translation aliases."""
+
+    normalized = unicodedata.normalize("NFKC", name).strip()
+    parts = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", normalized)
+    if not parts:
+        return None
+    body = r"[^\w\u4e00-\u9fff]*".join(re.escape(part) for part in parts)
+    if any(re.search(r"[A-Za-z0-9]", part) for part in parts):
+        body = rf"(?<![A-Za-z0-9]){body}(?![A-Za-z0-9])"
+    return re.compile(body, flags=re.I)
+
+
+def _series_spans(text: str, name: str) -> list[tuple[int, int]]:
+    pattern = _series_pattern(name)
+    return [match.span() for match in pattern.finditer(unicodedata.normalize("NFKC", text))] if pattern else []
+
+
+def _strong_excluded_series_mention(text: str, name: str, selected_names: list[str]) -> bool:
+    """Detect authoritative out-of-scope labels while rejecting substring collisions.
+
+    Latin labels require token boundaries. CJK labels must end at a CJK boundary,
+    so ordinary compounds such as ``保障型`` are not treated as a series mention.
+    Any occurrence nested inside a longer selected source label is also ignored.
+    """
+
+    normalized_text = unicodedata.normalize("NFKC", text)
+    selected_spans = [span for selected in selected_names for span in _series_spans(normalized_text, selected)]
+    contains_cjk = bool(re.search(r"[\u4e00-\u9fff]", name))
+    for start, end in _series_spans(normalized_text, name):
+        if any(selected_start <= start and end <= selected_end for selected_start, selected_end in selected_spans):
+            continue
+        if contains_cjk and end < len(normalized_text) and re.match(r"[\u4e00-\u9fff]", normalized_text[end]):
+            continue
+        return True
+    return False
+
+
+_CAUSAL_ASSERTION = re.compile(
+    r"(?:导致|造成|所致|驱动|依赖于?|意味着|受.{0,40}影响|due\s+to|driven\s+by|caused\s+by|"
+    r"results?\s+from|depends?\s+on|means?\s+that)",
+    flags=re.I,
+)
+_CAUSAL_BOUNDARY = re.compile(
+    r"(?:不代表|不能|无法|未(?:能)?证明|不可(?:据此)?|待验证|(?:需(?:要)?|有待).{0,60}(?:验证|查证|确认)|"
+    r"需要.{0,30}(?:数据|证据)|"
+    r"not\s+(?:causal|causality|proof)|cannot|unable\s+to|needs?\s+(?:validation|evidence|data)|"
+    r"requires?\s+(?:validation|evidence|data))",
+    flags=re.I,
+)
+
+
+def _unsupported_chart_inferences(answer: str, scope: dict[str, Any] | None) -> list[str]:
+    """Return causal chart claims that do not state their own evidence boundary."""
+
+    if not isinstance(scope, dict) or not scope.get("no_pairwise_mapping"):
+        return []
+    violations: list[str] = []
+    for segment in _segments(answer):
+        cleaned = segment.strip()
+        if cleaned and _CAUSAL_ASSERTION.search(cleaned) and not _CAUSAL_BOUNDARY.search(cleaned):
+            violations.append(cleaned)
+    return violations
+
+
+def _remove_claim_segments(answer: str, claims: list[str]) -> tuple[str, int]:
+    """Remove exact claim segments while preserving the rest of each line."""
+
+    rejected = set(claims)
+    repaired_lines: list[str] = []
+    removed = 0
+    for line in answer.splitlines():
+        kept: list[str] = []
+        for segment in _segments(line):
+            if segment.strip() in rejected:
+                removed += 1
+            else:
+                kept.append(segment)
+        repaired_line = "".join(kept).rstrip()
+        if repaired_line or not line.strip():
+            repaired_lines.append(repaired_line)
+    return _remove_orphan_headings("\n".join(repaired_lines)), removed
+
+
 def _chart_scope_diagnostics(answer: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:
     scope = next(
         (
@@ -415,10 +499,11 @@ def _chart_scope_diagnostics(answer: str, evidence: list[dict[str, Any]]) -> dic
     if not isinstance(scope, dict):
         return {"active": False, "outside_scope_series": [], "missing_family_coverage": {}}
 
+    selected_names = [name for name in scope.get("selected_series_names", []) if isinstance(name, str) and name]
     outside = [
         name
         for name in scope.get("excluded_document_series_names", [])
-        if isinstance(name, str) and name and _mentions_series(answer, name)
+        if isinstance(name, str) and name and _strong_excluded_series_mention(answer, name, selected_names)
     ]
     minimum = scope.get("minimum_family_mentions") or 0
     missing: dict[str, dict[str, Any]] = {}
@@ -489,6 +574,7 @@ class ClaimEvidenceVerifier:
         allowed_facts = numeric_facts(allowed_corpus)
         unsupported = _unsupported_facts(answer, allowed_facts, allowed_corpus)
         chart_scope = _chart_scope_diagnostics(answer, evidence)
+        unsupported_inferences = _unsupported_chart_inferences(answer, chart_scope)
 
         warnings: list[str] = []
         if citation_failed:
@@ -499,6 +585,8 @@ class ClaimEvidenceVerifier:
             warnings.append("LLM_CHART_SCOPE_VALIDATION_FAILED")
         if chart_scope["missing_family_coverage"]:
             warnings.append("LLM_CHART_COVERAGE_VALIDATION_FAILED")
+        if unsupported_inferences:
+            warnings.append("LLM_CHART_INFERENCE_VALIDATION_FAILED")
 
         diagnostics: dict[str, Any] = {
             "references": sorted(references),
@@ -507,13 +595,15 @@ class ClaimEvidenceVerifier:
             "evidence_roles": sorted({str(item.get("content_role") or "unknown") for item in evidence}),
             "task_summary": str((task_frame or {}).get("task_summary") or ""),
             "chart_scope": chart_scope,
+            "unsupported_chart_inferences": unsupported_inferences,
             "disposition": "accepted",
         }
         if not warnings:
             return VerificationResult(True, (), diagnostics)
 
-        repaired, removed = _repair_candidate(
-            answer,
+        inference_repaired, inference_removed = _remove_claim_segments(answer, unsupported_inferences)
+        repaired, numeric_removed = _repair_candidate(
+            inference_repaired,
             allowed=allowed_facts,
             valid_references=valid_references,
             allowed_corpus=allowed_corpus,
@@ -522,7 +612,8 @@ class ClaimEvidenceVerifier:
         repaired_unsupported = _unsupported_facts(repaired, allowed_facts, allowed_corpus)
         repaired_citations_valid = not evidence or bool(repaired_references and repaired_references <= valid_references)
         repaired_chart_scope = _chart_scope_diagnostics(repaired, evidence)
-        diagnostics["removed_claim_segments"] = removed
+        repaired_inferences = _unsupported_chart_inferences(repaired, repaired_chart_scope)
+        diagnostics["removed_claim_segments"] = inference_removed + numeric_removed
         if (
             repaired != answer
             and _substantive(repaired)
@@ -531,6 +622,7 @@ class ClaimEvidenceVerifier:
             and not repaired_unsupported
             and not repaired_chart_scope["outside_scope_series"]
             and not repaired_chart_scope["missing_family_coverage"]
+            and not repaired_inferences
         ):
             diagnostics["disposition"] = "repaired"
             return VerificationResult(True, tuple(warnings), diagnostics, repaired)

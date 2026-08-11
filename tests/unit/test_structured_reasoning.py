@@ -368,6 +368,10 @@ def test_broad_chart_analysis_builds_one_slide_local_evidence_bundle() -> None:
     assert "Observed recent divergence" in result.text
     assert "Agent Productivity" in result.text and "Protection Mix" in result.text
     assert result.evidence[0]["chart_scope"] == result.scope
+    assert "核心判断" in result.fallback_text
+    assert "规模节奏" in result.fallback_text
+    assert "增长广度" in result.fallback_text
+    assert "有边界的推断" in result.fallback_text
 
 
 def test_broad_chart_analysis_does_not_activate_for_non_chart_business_question() -> None:
