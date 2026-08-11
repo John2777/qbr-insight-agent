@@ -72,6 +72,30 @@ def test_table_reasoner_filters_and_aggregates_rows() -> None:
     assert liquid and all(value in liquid.answer for value in ("股息", "股份回购", "缓冲/其他", "4,378", "60%"))
 
 
+def test_table_reasoner_compares_two_explicit_aggregate_groups_without_domain_rules() -> None:
+    source = table_source(
+        "用途 | 金额 US$m | 占比 | 等级\n"
+        "项目甲 | 2,480 | 34% | 高\n"
+        "项目乙 | 1,743 | 24% | 高\n"
+        "项目丙 | 2,314 | 32% | 中\n"
+        "科技与转型 | 420 | 6% | 中\n"
+        "项目戊 | 180 | 2% | 低\n"
+        "其他 | 155 | 2% | 低\n"
+        "合计 | 7,292 | 100% | —"
+    )
+
+    result = TableReasoner().answer(
+        "项目甲和项目乙合计占多少、金额是多少？与项目丙、科技转型和项目戊的合计相比如何？",
+        [source],
+    )
+
+    assert result is not None
+    assert result.operation == "grouped_aggregate_comparison"
+    assert "项目甲、项目乙" in result.answer and "4,223" in result.answer and "58%" in result.answer
+    assert "项目丙、科技与转型、项目戊" in result.answer and "2,914" in result.answer and "40%" in result.answer
+    assert "高1,309" in result.answer and "高18个百分点" in result.answer and "1.45倍" in result.answer
+
+
 def test_legacy_table_chunk_is_repaired_from_structured_cells() -> None:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -377,6 +401,25 @@ def test_broad_chart_analysis_builds_one_slide_local_evidence_bundle() -> None:
 def test_broad_chart_analysis_does_not_activate_for_non_chart_business_question() -> None:
     question = "公司的整体优势是什么？"
     assert ChartAnalyzer().analyze(question, _dense_chart_rows(), plan=deterministic_plan(question)) is None
+
+
+def test_chart_analysis_respects_nonvisual_plan_even_when_operations_contain_group_numbers() -> None:
+    question = "项目甲和项目乙合计多少，与项目丙和项目丁合计相比如何？"
+    plan = replace(
+        deterministic_plan(question),
+        operations=("Sum Group 1", "Sum Group 2"),
+        needs_visuals=False,
+        planner="llm_semantic",
+    )
+
+    result = ChartAnalyzer().analyze(
+        question,
+        _dense_chart_rows(),
+        plan=plan,
+        preferred_slide_ids={"slide_4"},
+    )
+
+    assert result is None
 
 
 def test_chart_analysis_does_not_sum_heterogeneous_metrics_across_market_categories() -> None:

@@ -270,6 +270,12 @@ def build_evidence_contract(
         return (
             EvidenceFacet(_facet_id("chart_calculation", "", question), question, "chart_calculation"),
         )
+    if not (clause_kinds & non_calculation_requirements) and any(
+        str(row.get("extraction") or "") == "native_table_calculation" for row in tool_rows
+    ):
+        return (
+            EvidenceFacet(_facet_id("table_calculation", "", question), question, "table_calculation"),
+        )
 
     facets: list[EvidenceFacet] = []
     for clause in clauses or [question.strip()]:
@@ -358,6 +364,8 @@ def _fully_supports(facet: EvidenceFacet, evidence: dict[str, Any]) -> bool:
         return role == "chart" and evidence.get("extraction") == "native_chart_analysis_bundle"
     if facet.kind == "chart_calculation":
         return role == "chart" and evidence.get("extraction") == "native_chart_calculation"
+    if facet.kind == "table_calculation":
+        return role == "table" and evidence.get("extraction") == "native_table_calculation"
     return bool(text.strip())
 
 

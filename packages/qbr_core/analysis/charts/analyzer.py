@@ -112,7 +112,7 @@ class ChartAnalyzer:
         preferred = preferred_element_ids or set()
         preferred_slides = preferred_slide_ids or set()
         request = request_signature(plan)
-        if not plan.needs_visuals and not (len(request.series_counts) >= 2 and (preferred or preferred_slides)):
+        if not plan.needs_visuals:
             return None
         scopes = chart_scopes(rows)
         selected, selection = self._select_scope(scopes, request, preferred, preferred_slides)

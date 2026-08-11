@@ -443,6 +443,7 @@ class QAApplicationService:
                 "verified_calculation": answer_result.diagnostics.get("verified_calculation"),
                 "verified_calculation_facts": answer_result.diagnostics.get("verified_calculation_facts", []),
                 "verified_calculation_kind": answer_result.diagnostics.get("verified_calculation_kind"),
+                "verified_calculation_scope": answer_result.diagnostics.get("verified_calculation_scope"),
                 "chart_scope": answer_result.diagnostics.get("chart_scope"),
                 "verification": verification_info,
                 "conversation_context": {

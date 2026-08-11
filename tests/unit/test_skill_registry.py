@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from packages.qbr_core import QBRService, Settings
+from packages.qbr_core.planning import deterministic_plan
+from packages.qbr_core.retrieval.engine import RetrievalResult
 from packages.qbr_core.skills.registry import PARSER_SKILL_KIND, SkillRegistry, SkillRegistryError
 
 
@@ -131,6 +133,52 @@ def test_table_reasoning_skill_loads_only_when_table_analysis_is_requested(tmp_p
     status = next(item for item in service.health()["skills"] if item["name"] == skill_name)
     assert status["loaded"] is True
     assert status["uses_model"] is False
+
+
+def test_answer_engine_prioritizes_verified_table_calculation_for_nonvisual_group_comparison(
+    tmp_path: Path,
+) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    question = "项目甲和项目乙合计占多少、金额是多少？与项目丙、科技转型和项目戊的合计相比如何？"
+    source = {
+        "id": "capital_table",
+        "document_id": "doc",
+        "document_version_id": "dv",
+        "slide_id": "slide_4",
+        "slide_no": 4,
+        "slide_title": "资本用途",
+        "element_id": "element_table",
+        "chunk_type": "table",
+        "content_role": "table",
+        "content": (
+            "用途 | 金额 US$m | 占比\n"
+            "项目甲 | 2,480 | 34%\n"
+            "项目乙 | 1,743 | 24%\n"
+            "项目丙 | 2,314 | 32%\n"
+            "科技与转型 | 420 | 6%\n"
+            "项目戊 | 180 | 2%\n"
+            "其他 | 155 | 2%\n"
+            "合计 | 7,292 | 100%"
+        ),
+        "bbox_json": "{}",
+        "confidence": 1.0,
+        "source_kind": "native_ooxml",
+        "document_title": "Capital",
+        "retrieval_score": 10.0,
+    }
+
+    class StaticRetriever:
+        def search_plan(self, *_args: object, **_kwargs: object) -> RetrievalResult:
+            return RetrievalResult([source], "test", question)
+
+    engine = service.qa_service.answer_engine
+    engine.retriever = StaticRetriever()  # type: ignore[assignment]
+    result = engine.answer_result(question, "ws_demo", [], plan=deterministic_plan(question))
+
+    assert result.diagnostics["verified_calculation_kind"] == "table_calculation"
+    assert result.diagnostics["verified_calculation_scope"]["operation"] == "grouped_aggregate_comparison"
+    assert all(value in result.answer for value in ("4,223", "58%", "2,914", "40%", "1,309", "18个百分点"))
+    assert result.evidence[0]["content_role"] == "table"
 
 
 def test_ingestion_uses_registry_selected_parser_metadata(tmp_path: Path, synthetic_pptx: Path) -> None:

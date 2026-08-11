@@ -88,6 +88,35 @@ def _format_number(value: float) -> str:
     return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
+def _coordination_relaxed(value: str) -> str:
+    """Normalize labels while treating optional CJK conjunctions as separators."""
+
+    return re.sub(r"(?<=[\u4e00-\u9fff])[和与及](?=[\u4e00-\u9fff])", "", _normalize(value))
+
+
+def _is_total_label(value: str) -> bool:
+    key = _normalize(value)
+    return any(marker in key for marker in ("合计", "总计", "集团合计", "total"))
+
+
+def _label_span(question: str, label: str) -> tuple[int, int] | None:
+    """Locate a source row label in the question with optional conjunction variation."""
+
+    folded = unicodedata.normalize("NFKC", question).casefold()
+    candidates = [label, *re.split(r"\s*(?:/|｜|\||·)\s*", label)]
+    spans: list[tuple[int, int]] = []
+    for candidate in candidates:
+        candidate = unicodedata.normalize("NFKC", candidate).casefold().strip()
+        if len(_normalize(candidate)) < 2:
+            continue
+        parts = [part for part in re.split(r"[和与及]", candidate) if part]
+        pattern = r"\s*(?:和|与|及)?\s*".join(re.escape(part) for part in parts)
+        match = re.search(pattern, folded, flags=re.I)
+        if match:
+            spans.append(match.span())
+    return min(spans, default=None)
+
+
 def _condition_passes(current: str, condition: str) -> bool | None:
     current_value = _number(current)
     threshold_value = _number(condition)
@@ -125,6 +154,7 @@ class ParsedTable:
     def row_matches(self, question: str) -> list[tuple[int, list[str]]]:
         """Return source rows or columns matching the normalized query terms."""
         question_key = _normalize(question)
+        relaxed_question_key = _coordination_relaxed(question)
         matches: list[tuple[int, list[str]]] = []
         for index, row in enumerate(self.rows):
             if not row:
@@ -133,10 +163,15 @@ class ParsedTable:
             direct_match = False
             for label in labels:
                 label_key = _normalize(label)
-                if len(label_key) < 2 or label_key not in question_key:
+                relaxed_label_key = _coordination_relaxed(label)
+                if len(label_key) < 2 or (
+                    label_key not in question_key and relaxed_label_key not in relaxed_question_key
+                ):
                     continue
-                position = question_key.find(label_key)
-                after = question_key[position + len(label_key):position + len(label_key) + 1]
+                active_key = label_key if label_key in question_key else relaxed_label_key
+                active_question = question_key if label_key in question_key else relaxed_question_key
+                position = active_question.find(active_key)
+                after = active_question[position + len(active_key):position + len(active_key) + 1]
                 if label_key.isascii() and after and after.isascii() and after.isalnum():
                     continue
                 direct_match = True
@@ -168,6 +203,7 @@ class ReasoningResult:
     """Carry a table-derived answer and the evidence used to derive it."""
     answer: str
     source: dict[str, Any]
+    operation: str = "table_reasoning"
 
 
 class TableReasoner:
@@ -180,19 +216,23 @@ class TableReasoner:
         for table in tables:
             if table.relevance(question) < 3:
                 continue
-            result = (
-                self._threshold(question, table)
-                or self._extreme(question, table)
-                or self._filter(question, table)
-                or self._ratio(question, table)
-                or self._difference(question, table)
-                or self._lookup(question, table)
+            operations = (
+                ("grouped_aggregate_comparison", self._grouped_aggregate_comparison),
+                ("threshold", self._threshold),
+                ("extreme", self._extreme),
+                ("filter", self._filter),
+                ("ratio", self._ratio),
+                ("difference", self._difference),
+                ("lookup", self._lookup),
             )
-            if result:
+            for operation, resolver in operations:
+                result = resolver(question, table)
+                if not result:
+                    continue
                 subject = re.match(r"^(.{2,30}?(?:表|矩阵))", question)
                 if subject and subject.group(1) not in result:
                     result = f"{subject.group(1)}中，{result}"
-                return ReasoningResult(result + " [1]", table.source)
+                return ReasoningResult(result + " [1]", table.source, operation)
         return None
 
     @staticmethod
@@ -201,6 +241,89 @@ class TableReasoner:
         matches = table.column_matches(question)
         unit_indices = [index for index, header in enumerate(table.headers) if _normalize(header) == "单位"]
         return list(dict.fromkeys([*matches, *unit_indices]))
+
+    def _grouped_aggregate_comparison(self, question: str, table: ParsedTable) -> str | None:
+        """Aggregate two explicitly delimited row groups and compare like-for-like columns."""
+
+        folded = question.casefold()
+        if not any(cue in folded for cue in ("合计", "合共", "总和", "加总", "combined", "sum", "total")):
+            return None
+        matched = [
+            (index, row, span)
+            for index, row in table.row_matches(question)
+            if row and not _is_total_label(row[0]) and (span := _label_span(question, row[0])) is not None
+        ]
+        if len(matched) < 3:
+            return None
+        matched.sort(key=lambda item: item[2][0])
+        boundaries: list[int] = []
+        for position, (left, right) in enumerate(zip(matched, matched[1:], strict=False), 1):
+            between = question[left[2][1] : right[2][0]]
+            if re.search(
+                r"(?:合计|合共|总和|加总|combined|sum|total).{0,80}(?:[？?；;。]|与|和|versus|vs\.?|compared)",
+                between,
+                flags=re.I | re.S,
+            ):
+                boundaries.append(position)
+        if len(boundaries) != 1:
+            return None
+        boundary = boundaries[0]
+        groups = ([item[1] for item in matched[:boundary]], [item[1] for item in matched[boundary:]])
+        if not all(groups):
+            return None
+
+        columns = [index for index in table.column_matches(question) if index > 0]
+        if "占" in question or any(cue in folded for cue in ("share", "percentage", "percent")):
+            columns.extend(
+                index
+                for index, header in enumerate(table.headers)
+                if any(cue in _normalize(header) for cue in ("占比", "比例", "份额", "share", "percent"))
+            )
+        columns = list(dict.fromkeys(columns))
+        numeric_columns = [
+            index
+            for index in columns
+            if all(_number(row[index]) is not None for group in groups for row in group)
+        ]
+        if not numeric_columns:
+            return None
+
+        totals = [
+            {index: sum(float(_number(row[index]) or 0) for row in group) for index in numeric_columns}
+            for group in groups
+        ]
+
+        def is_share(index: int) -> bool:
+            header = _normalize(table.headers[index])
+            return any(marker in header for marker in ("占比", "比例", "份额", "share", "percent")) or all(
+                "%" in row[index] for group in groups for row in group
+            )
+
+        group_descriptions: list[str] = []
+        for group_no, (group, values) in enumerate(zip(groups, totals, strict=True), 1):
+            members = "、".join(row[0] for row in group)
+            measures = "，".join(
+                f"{table.headers[index]}合计为{_format_number(values[index])}{'%' if is_share(index) else ''}"
+                for index in numeric_columns
+            )
+            group_descriptions.append(f"第{group_no}组（{members}）：{measures}")
+
+        comparisons: list[str] = []
+        for index in numeric_columns:
+            difference = totals[0][index] - totals[1][index]
+            if math.isclose(difference, 0.0, abs_tol=1e-9):
+                comparisons.append(f"{table.headers[index]}相同")
+                continue
+            direction = "高" if difference > 0 else "低"
+            unit = "个百分点" if is_share(index) else ""
+            comparisons.append(f"第1组{table.headers[index]}{direction}{_format_number(abs(difference))}{unit}")
+        amount_column = next((index for index in numeric_columns if not is_share(index)), None)
+        if amount_column is not None and not math.isclose(totals[1][amount_column], 0.0, abs_tol=1e-12):
+            comparisons.append(
+                f"第1组{table.headers[amount_column]}约为第2组的"
+                f"{totals[0][amount_column] / totals[1][amount_column]:.2f}倍"
+            )
+        return "；".join(group_descriptions) + "。相比之下，" + "，".join(comparisons) + "。"
 
     def _threshold(self, question: str, table: ParsedTable) -> str | None:
         """Extract a numeric threshold and comparison operator from the question."""

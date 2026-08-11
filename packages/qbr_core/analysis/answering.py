@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -81,8 +82,10 @@ class DeterministicAnswerEngine:
         ):
             retrieval, pack = self._retry_missing_evidence(task, workspace_id, document_ids, retrieval, pack)
 
-        chart_rows = self._load_chart_rows(workspace_id, document_ids)
-        calculation = self.chart_calculator.analyze(question, chart_rows)
+        calculation = self._table_calculation(question, retrieval.items) if not task.needs_visuals else None
+        chart_rows = self._load_chart_rows(workspace_id, document_ids) if calculation is None else []
+        if calculation is None:
+            calculation = self.chart_calculator.analyze(question, chart_rows)
         if calculation is None:
             preferred_element_ids = {
                 str(item.get("element_id") or "")
@@ -296,7 +299,7 @@ class DeterministicAnswerEngine:
                 "The current document scope did not yield enough evidence to answer this question."
             )
 
-        if calculation is not None and calculation.kind == "chart_analysis" and calculation.fallback_text:
+        if calculation is not None and calculation.fallback_text:
             if not pack.coverage.has_gaps:
                 return calculation.fallback_text
             gaps = pack.coverage.gap_labels[:3]
@@ -384,3 +387,50 @@ class DeterministicAnswerEngine:
             return None
         loaded = self.skill_registry.load(self.table_reasoning_skill)
         return loaded.module.answer(question, sources)
+
+    def _table_calculation(self, question: str, sources: list[dict[str, Any]]) -> VerifiedCalculation | None:
+        """Convert a table skill result into the same auditable contract used by chart calculations."""
+
+        result = self._table_reasoning_answer(question, sources)
+        if result is None:
+            return None
+        source = dict(result.source)
+        try:
+            bbox = json.loads(str(source.get("bbox_json") or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            bbox = {}
+        scope = {
+            "kind": "table_calculation",
+            "operation": result.operation,
+            "document_id": source.get("document_id"),
+            "slide_id": source.get("slide_id"),
+            "slide_no": source.get("slide_no"),
+            "element_ids": [source["element_id"]] if source.get("element_id") else [],
+            "chunk_ids": [source["id"]] if source.get("id") else [],
+        }
+        evidence = {
+            "document_version_id": source.get("document_version_id"),
+            "document_id": source.get("document_id"),
+            "slide_id": source.get("slide_id"),
+            "element_id": source.get("element_id"),
+            "chunk_id": source.get("id"),
+            "quote": str(source.get("content") or ""),
+            "bbox": bbox if isinstance(bbox, dict) else {},
+            "confidence": float(source.get("confidence") or source.get("element_confidence") or 1.0),
+            "source_kind": source.get("source_kind") or "native_ooxml",
+            "document_title": source.get("document_title"),
+            "slide_no": source.get("slide_no"),
+            "slide_title": source.get("slide_title"),
+            "content_role": "table",
+            "facet": "verified table calculation",
+            "extraction": "native_table_calculation",
+            "calculation_operation": result.operation,
+            "calculation_scope": scope,
+        }
+        return VerifiedCalculation(
+            text=result.answer,
+            evidence=(evidence,),
+            kind="table_calculation",
+            scope=scope,
+            fallback_text=result.answer,
+        )

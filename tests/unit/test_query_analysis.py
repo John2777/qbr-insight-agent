@@ -105,6 +105,24 @@ def test_chart_calculation_bundle_satisfies_one_typed_contract_without_hiding_bu
     assert any(facet.kind == "driver_attribution" for facet in compound)
 
 
+def test_table_calculation_bundle_satisfies_one_typed_contract() -> None:
+    calculation = [
+        {
+            "quote": "项目甲=34%; 项目乙=24%; group total=58%",
+            "content_role": "table",
+            "extraction": "native_table_calculation",
+            "confidence": 1.0,
+            "evidence_atom_id": "table_calculation",
+        }
+    ]
+
+    contract = build_evidence_contract("项目甲和项目乙合计占多少？", tool_evidence=calculation)
+    coverage = evaluate_evidence_coverage(contract, calculation)
+
+    assert len(contract) == 1 and contract[0].kind == "table_calculation"
+    assert coverage.supported_count == 1 and not coverage.has_gaps
+
+
 def test_deterministic_evidence_updates_document_coverage_even_without_retrieved_atoms() -> None:
     plan = deterministic_plan("请分析这张图", ["doc"])
     empty = EvidencePackBuilder().build(plan, [])
