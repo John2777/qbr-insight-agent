@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import getpass
 
-from packages.qbr_core.auth import create_password_hash
+from packages.qbr_core.security.authentication import create_password_hash
 
 
 def main() -> None:

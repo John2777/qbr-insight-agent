@@ -7,8 +7,8 @@ from langchain_core.messages import AIMessage
 from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService
-from packages.qbr_core.config import Settings
-from packages.qbr_core.llm import EvidenceQAAgent, build_chat_model
+from packages.qbr_core.foundation.config import Settings
+from packages.qbr_core.providers.llm import EvidenceQAAgent, build_chat_model
 
 
 class FakeModel:
@@ -189,13 +189,13 @@ def test_generation_prompt_marks_structured_summary_as_non_evidence(tmp_path: Pa
 
 
 def test_deepseek_answer_client_explicitly_disables_thinking(tmp_path: Path) -> None:
-    with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
+    with patch("packages.qbr_core.providers.llm.ChatOpenAI") as constructor:
         build_chat_model(settings_at(tmp_path), "deepseek-v4-flash", thinking_enabled=False)
     assert constructor.call_args.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_deepseek_planner_client_can_use_thinking_independently(tmp_path: Path) -> None:
-    with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
+    with patch("packages.qbr_core.providers.llm.ChatOpenAI") as constructor:
         build_chat_model(settings_at(tmp_path), "deepseek-v4-flash", thinking_enabled=True)
     assert constructor.call_args.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
 
@@ -212,13 +212,13 @@ def test_qwen_model_identity_disables_thinking_with_generic_provider(tmp_path: P
         llm_api_key="test-key",
         llm_model="qwen3.7-plus",
     )
-    with patch("packages.qbr_core.llm.ChatOpenAI") as constructor:
+    with patch("packages.qbr_core.providers.llm.ChatOpenAI") as constructor:
         build_chat_model(settings, "qwen3.6-flash", thinking_enabled=False)
     assert constructor.call_args.kwargs["extra_body"] == {"enable_thinking": False}
 
 
 def test_service_disables_thinking_for_structured_planner_output(tmp_path: Path) -> None:
-    with patch("packages.qbr_core.service.build_chat_model") as constructor:
+    with patch("packages.qbr_core.application.service.build_chat_model") as constructor:
         service = QBRService(settings_at(tmp_path))
 
     assert service.query_planner.model is constructor.return_value

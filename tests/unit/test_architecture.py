@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import ast
+import importlib
+import re
 from pathlib import Path
 
 import pytest
 
 from packages.qbr_core import DeterministicAnswerEngine, QAApplicationService, QBRService, Settings
-from packages.qbr_core.errors import Conflict, ResourceNotFound
-from packages.qbr_core.lease import LeaseCoordinator, LeasePolicy
-from packages.qbr_core.service_ingestion import IngestionService
-from packages.qbr_core.service_persistence import ParsedPersistenceService
-from packages.qbr_core.service_resources import ResourceService
+from packages.qbr_core.application.ingestion import IngestionService
+from packages.qbr_core.application.persistence import ParsedPersistenceService
+from packages.qbr_core.application.resources import ResourceService
+from packages.qbr_core.foundation.errors import Conflict, ResourceNotFound
+from packages.qbr_core.foundation.leases import LeaseCoordinator, LeasePolicy
 
 ROOT = Path(__file__).parents[2]
+CORE_ROOT = ROOT / "packages/qbr_core"
 PYTHON_SOURCE_ROOTS = ("apps", "packages", "scripts", "tests")
 MAX_PYTHON_FILE_LINES = 700
 
@@ -25,6 +29,59 @@ def test_python_source_files_stay_within_size_limit() -> None:
                 violations.append(f"{path.relative_to(ROOT)}: {line_count} lines")
 
     assert not violations, "Python files exceed the 700-line limit:\n" + "\n".join(sorted(violations))
+
+
+def test_qbr_core_root_remains_organized_into_feature_packages() -> None:
+    root_modules = {path.name for path in CORE_ROOT.glob("*.py")}
+    feature_packages = {path.name for path in CORE_ROOT.iterdir() if path.is_dir() and (path / "__init__.py").is_file()}
+
+    assert root_modules == {"__init__.py", "compatibility.py"}
+    assert {
+        "analysis",
+        "application",
+        "conversations",
+        "documents",
+        "foundation",
+        "planning",
+        "providers",
+        "retrieval",
+        "security",
+        "skills",
+    } <= feature_packages
+
+
+def test_qbr_core_classes_and_methods_have_english_docstrings() -> None:
+    violations: list[str] = []
+    for path in CORE_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            definitions = [node, *(item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef))]
+            for definition in definitions:
+                docstring = ast.get_docstring(definition)
+                qualified_name = node.name if definition is node else f"{node.name}.{definition.name}"
+                if not docstring:
+                    violations.append(f"{path.relative_to(ROOT)}:{definition.lineno} missing {qualified_name}")
+                elif re.search(r"[\u3400-\u9fff]", docstring):
+                    violations.append(f"{path.relative_to(ROOT)}:{definition.lineno} non-English {qualified_name}")
+
+    assert not violations, "Class and method docstring violations:\n" + "\n".join(violations)
+
+
+def test_legacy_module_paths_resolve_to_canonical_modules() -> None:
+    aliases = {
+        "auth": "security.authentication",
+        "db": "foundation.database",
+        "query_planning": "planning",
+        "qa_service": "application.qa_service",
+        "service": "application.service",
+    }
+
+    for legacy_name, canonical_name in aliases.items():
+        legacy = importlib.import_module(f"packages.qbr_core.{legacy_name}")
+        canonical = importlib.import_module(f"packages.qbr_core.{canonical_name}")
+        assert legacy is canonical
 
 
 def test_composition_root_wires_explicit_application_boundaries(tmp_path: Path) -> None:
@@ -52,14 +109,14 @@ def test_qbr_service_uses_components_instead_of_mixin_inheritance(tmp_path: Path
     assert service.resources._root is service
 
 
-def test_query_planning_module_remains_a_small_compatibility_facade() -> None:
-    facade = ROOT / "packages/qbr_core/query_planning.py"
+def test_query_planning_package_exposes_a_small_public_facade() -> None:
+    facade = ROOT / "packages/qbr_core/planning/__init__.py"
     source = facade.read_text(encoding="utf-8")
 
     assert len(source.splitlines()) <= 20
-    assert "from .query_models import QueryPlan, RetrievalQuery" in source
-    assert "from .query_builder import deterministic_plan" in source
-    assert "from .planner_agent import QueryPlannerAgent" in source
+    assert "from .models import QueryPlan, RetrievalQuery" in source
+    assert "from .builder import deterministic_plan, linguistic_plan" in source
+    assert "from .agent import QueryPlannerAgent" in source
 
 
 def test_lease_policy_rejects_unsafe_heartbeat_timing() -> None:

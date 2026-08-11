@@ -15,11 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.auth import (
+from packages.qbr_core.foundation.errors import QBRError
+from packages.qbr_core.foundation.identifiers import new_id
+from packages.qbr_core.security.authentication import (
     LoginRateLimiter,
 )
-from packages.qbr_core.errors import QBRError
-from packages.qbr_core.ids import new_id
 
 from .routes import (
     auth_router,

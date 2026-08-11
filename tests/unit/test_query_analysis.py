@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from packages.qbr_core.answering import DeterministicAnswerEngine
-from packages.qbr_core.coverage import build_evidence_contract, evaluate_evidence_coverage
-from packages.qbr_core.evidence import EvidencePackBuilder, infer_facet
-from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
+from packages.qbr_core.analysis.answering import DeterministicAnswerEngine
+from packages.qbr_core.planning import QueryPlannerAgent, deterministic_plan
+from packages.qbr_core.retrieval.coverage import build_evidence_contract, evaluate_evidence_coverage
+from packages.qbr_core.retrieval.evidence import EvidencePackBuilder, infer_facet
 
 
 def _row(

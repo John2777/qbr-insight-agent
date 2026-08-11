@@ -4,13 +4,13 @@ import json
 import sqlite3
 from dataclasses import replace
 
-from packages.qbr_core.answering import DeterministicAnswerEngine
-from packages.qbr_core.calculations import ChartCalculator, VerifiedCalculation
-from packages.qbr_core.chart_analysis import ChartAnalyzer
-from packages.qbr_core.db import Database
-from packages.qbr_core.query_planning import deterministic_plan
-from packages.qbr_core.reasoning import TableReasoner
-from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
+from packages.qbr_core.analysis.answering import DeterministicAnswerEngine
+from packages.qbr_core.analysis.calculations import ChartCalculator, VerifiedCalculation
+from packages.qbr_core.analysis.charts.analyzer import ChartAnalyzer
+from packages.qbr_core.analysis.table_reasoning import TableReasoner
+from packages.qbr_core.foundation.database import Database
+from packages.qbr_core.planning import deterministic_plan
+from packages.qbr_core.retrieval.engine import EvidenceRetriever, query_terms
 
 
 def table_source(content: str) -> dict[str, object]:

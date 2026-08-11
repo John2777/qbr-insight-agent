@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from packages.qbr_core.auth import AuthPrincipal
+from packages.qbr_core.security.authentication import AuthPrincipal
 
 
 class Principal(BaseModel):

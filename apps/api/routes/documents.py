@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from fastapi.responses import FileResponse
 
 from packages.qbr_core import QBRService
-from packages.qbr_core.errors import FileTooLarge
+from packages.qbr_core.foundation.errors import FileTooLarge
 
 from ..dependencies import _principal, _service
 from ..schemas import Principal
@@ -32,7 +32,7 @@ async def upload_document(
     principal.require("document:write")
     filename = file.filename or "presentation.pptx"
     if not filename.casefold().endswith(".pptx"):
-        from packages.qbr_core.errors import UnsupportedFile
+        from packages.qbr_core.foundation.errors import UnsupportedFile
 
         raise UnsupportedFile("Only .pptx files are accepted by this deployment.")
     parsed_metadata: dict[str, Any] = {}
@@ -40,11 +40,11 @@ async def upload_document(
         try:
             value = json.loads(metadata)
         except json.JSONDecodeError as exc:
-            from packages.qbr_core.errors import Conflict
+            from packages.qbr_core.foundation.errors import Conflict
 
             raise Conflict("metadata must be valid JSON") from exc
         if not isinstance(value, dict):
-            from packages.qbr_core.errors import Conflict
+            from packages.qbr_core.foundation.errors import Conflict
 
             raise Conflict("metadata must be a JSON object")
         parsed_metadata = value

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from packages.qbr_core.parser import (
+from packages.qbr_core.documents.parser import (
     PREVIEW_MAX_SIZE,
     THUMBNAIL_SIZE,
     _rendered_page_number,

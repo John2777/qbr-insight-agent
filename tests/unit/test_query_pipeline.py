@@ -8,10 +8,10 @@ from langchain_core.messages import AIMessage
 from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.db import utc_now
-from packages.qbr_core.evidence import EvidencePackBuilder, extract_relevant_quote
-from packages.qbr_core.query_planning import QueryPlannerAgent, deterministic_plan
-from packages.qbr_core.retrieval import EvidenceRetriever, query_terms
+from packages.qbr_core.foundation.database import utc_now
+from packages.qbr_core.planning import QueryPlannerAgent, deterministic_plan
+from packages.qbr_core.retrieval.engine import EvidenceRetriever, query_terms
+from packages.qbr_core.retrieval.evidence import EvidencePackBuilder, extract_relevant_quote
 
 
 class PlannerModel:

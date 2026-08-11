@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.run_warnings import describe_warning, has_degraded_warning, warning_details
+from packages.qbr_core.application.warnings import describe_warning, has_degraded_warning, warning_details
 
 
 def test_warning_catalog_separates_data_caveats_from_provider_fallbacks() -> None:

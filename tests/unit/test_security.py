@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from packages.qbr_core.errors import UnsafeArchive, UnsupportedFile
-from packages.qbr_core.security import inspect_pptx
+from packages.qbr_core.foundation.errors import UnsafeArchive, UnsupportedFile
+from packages.qbr_core.security.archive import inspect_pptx
 
 
 def test_rejects_non_ooxml_file(tmp_path: Path) -> None:
@@ -37,4 +37,3 @@ def test_rejects_external_package_relationship(tmp_path: Path) -> None:
         archive.writestr("ppt/_rels/presentation.xml.rels", rels)
     with pytest.raises(UnsafeArchive, match="External package relationship"):
         inspect_pptx(path)
-

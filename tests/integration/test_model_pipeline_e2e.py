@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
 from packages.qbr_core import Settings
-from packages.qbr_core.vision import VisualKnowledge
+from packages.qbr_core.documents.vision import VisualKnowledge
 
 
 class FakeSlideVisionEnricher:

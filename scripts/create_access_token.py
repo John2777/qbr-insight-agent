@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from packages.qbr_core.auth import create_hs256_token
-from packages.qbr_core.config import Settings
+from packages.qbr_core.foundation.config import Settings
+from packages.qbr_core.security.authentication import create_hs256_token
 
 
 def main() -> None:

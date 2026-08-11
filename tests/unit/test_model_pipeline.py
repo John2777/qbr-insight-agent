@@ -9,13 +9,13 @@ from typing import Any
 import pytest
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.db import Database, utc_now
-from packages.qbr_core.evidence import EvidencePackBuilder
-from packages.qbr_core.query_planning import deterministic_plan
-from packages.qbr_core.rerank import QwenReranker, RerankScore
-from packages.qbr_core.retrieval import EvidenceRetriever
-from packages.qbr_core.vector import FaissVectorStore, HashingEmbeddingProvider
-from packages.qbr_core.vision import VisualKnowledge
+from packages.qbr_core.documents.vision import VisualKnowledge
+from packages.qbr_core.foundation.database import Database, utc_now
+from packages.qbr_core.planning import deterministic_plan
+from packages.qbr_core.retrieval.engine import EvidenceRetriever
+from packages.qbr_core.retrieval.evidence import EvidencePackBuilder
+from packages.qbr_core.retrieval.reranking import QwenReranker, RerankScore
+from packages.qbr_core.retrieval.vector_store import FaissVectorStore, HashingEmbeddingProvider
 
 
 class ReverseReranker:
@@ -148,7 +148,7 @@ def test_qwen_rerank_client_uses_compatible_api_contract(tmp_path: Path, monkeyp
         captured["timeout"] = kwargs["timeout"]
         return FakeHTTPResponse()
 
-    monkeypatch.setattr("packages.qbr_core.rerank.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("packages.qbr_core.retrieval.reranking.urllib.request.urlopen", fake_urlopen)
     settings = Settings(
         tmp_path,
         tmp_path / "db.sqlite3",

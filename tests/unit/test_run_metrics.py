@@ -1,4 +1,4 @@
-from packages.qbr_core.qa_runtime import answer_metrics
+from packages.qbr_core.application.runtime import answer_metrics
 
 
 def test_answer_metrics_aggregate_planner_and_answer_usage() -> None:

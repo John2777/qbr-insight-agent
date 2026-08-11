@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.qbr_core.verification import ClaimEvidenceVerifier, markdown_format_integrity, numeric_facts
+from packages.qbr_core.analysis.verification import ClaimEvidenceVerifier, markdown_format_integrity, numeric_facts
 
 
 def _evidence(quote: str) -> list[dict[str, object]]:

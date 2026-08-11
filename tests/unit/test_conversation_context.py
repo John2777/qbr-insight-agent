@@ -6,9 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from packages.qbr_core import QBRService
-from packages.qbr_core.config import Settings
-from packages.qbr_core.conversation_context import estimate_tokens
-from packages.qbr_core.db import Database
+from packages.qbr_core.conversations.context import estimate_tokens
+from packages.qbr_core.foundation.config import Settings
+from packages.qbr_core.foundation.database import Database
 
 
 def _service(tmp_path: Path, *, max_turns: int = 4, token_budget: int = 2400) -> QBRService:
@@ -76,7 +76,7 @@ def test_same_timestamp_questions_use_explicit_message_binding_and_sequence(tmp_
     service = _service(tmp_path)
     conversation = service.create_conversation("ws_demo", "user_demo")
 
-    with patch("packages.qbr_core.qa_service.utc_now", return_value="2026-08-10T12:00:00.000Z"):
+    with patch("packages.qbr_core.application.qa_service.utc_now", return_value="2026-08-10T12:00:00.000Z"):
         first = service.ask(conversation["id"], "same-time first", "ws_demo", "user_demo")
         second = service.ask(conversation["id"], "same-time second", "ws_demo", "user_demo")
 

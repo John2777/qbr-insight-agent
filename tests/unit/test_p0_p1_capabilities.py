@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.auth import create_hs256_token, create_password_hash, verify_password
-from packages.qbr_core.db import utc_now
-from packages.qbr_core.ids import new_id
-from packages.qbr_core.qa_service import _answer_deltas
-from packages.qbr_core.retrieval import fts_query
+from packages.qbr_core.application.qa_service import _answer_deltas
+from packages.qbr_core.foundation.database import utc_now
+from packages.qbr_core.foundation.identifiers import new_id
+from packages.qbr_core.retrieval.engine import fts_query
+from packages.qbr_core.security.authentication import create_hs256_token, create_password_hash, verify_password
 
 
 def _ready_service(root: Path, presentation: Path) -> tuple[QBRService, dict[str, object]]:

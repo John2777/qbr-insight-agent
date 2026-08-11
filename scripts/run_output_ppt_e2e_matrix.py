@@ -18,8 +18,8 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
 from packages.qbr_core import QBRService
-from packages.qbr_core.config import Settings
-from packages.qbr_core.verification import markdown_format_integrity
+from packages.qbr_core.analysis.verification import markdown_format_integrity
+from packages.qbr_core.foundation.config import Settings
 
 QUESTIONS = (
     "本季度公司整体经营表现如何？哪些核心指标高于计划，哪些低于计划？",

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.query_planning import deterministic_plan
-from packages.qbr_core.terminology import QBR_TERMS, find_term, glossary_by_term
+from packages.qbr_core.planning import deterministic_plan
+from packages.qbr_core.planning.terminology import QBR_TERMS, find_term, glossary_by_term
 
 ROOT = Path(__file__).parents[2]
 

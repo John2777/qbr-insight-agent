@@ -7,11 +7,11 @@ from typing import Any
 import pytest
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.calculations import ChartCalculator
-from packages.qbr_core.db import Database, utc_now
-from packages.qbr_core.query_planning import deterministic_plan
-from packages.qbr_core.retrieval import EvidenceRetriever
-from packages.qbr_core.vector import FaissVectorStore, HashingEmbeddingProvider
+from packages.qbr_core.analysis.calculations import ChartCalculator
+from packages.qbr_core.foundation.database import Database, utc_now
+from packages.qbr_core.planning import deterministic_plan
+from packages.qbr_core.retrieval.engine import EvidenceRetriever
+from packages.qbr_core.retrieval.vector_store import FaissVectorStore, HashingEmbeddingProvider
 
 
 class RecordingVectorStore:

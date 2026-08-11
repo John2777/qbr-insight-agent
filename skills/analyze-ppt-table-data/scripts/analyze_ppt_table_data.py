@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from packages.qbr_core.reasoning import ReasoningResult, TableReasoner
+from packages.qbr_core.analysis.table_reasoning import ReasoningResult, TableReasoner
 
 _REASONER = TableReasoner()
 

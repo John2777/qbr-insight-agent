@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.skill_registry import PARSER_SKILL_KIND, SkillRegistry, SkillRegistryError
+from packages.qbr_core.skills.registry import PARSER_SKILL_KIND, SkillRegistry, SkillRegistryError
 
 
 def _write_parser_skill(

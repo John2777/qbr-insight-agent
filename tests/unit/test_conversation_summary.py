@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from packages.qbr_core import QBRService
-from packages.qbr_core.config import Settings
+from packages.qbr_core.foundation.config import Settings
 
 
 class FailingSummaryModel:

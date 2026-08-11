@@ -5,8 +5,8 @@ from typing import Annotated
 from fastapi import Header, Request
 
 from packages.qbr_core import QBRService, Settings
-from packages.qbr_core.auth import decode_hs256_token
-from packages.qbr_core.errors import AuthenticationRequired, ResourceNotFound
+from packages.qbr_core.foundation.errors import AuthenticationRequired, ResourceNotFound
+from packages.qbr_core.security.authentication import decode_hs256_token
 
 from .schemas import Principal
 
