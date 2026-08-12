@@ -75,7 +75,7 @@ describe("analytics refresh", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("shows which answer requirements are incomplete", async () => {
+  it("uses an English partial-support notice without exposing coverage details", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
       ...baseAnalytics,
       recent_runs: [{
@@ -88,8 +88,8 @@ describe("analytics refresh", () => {
           code: "PARTIAL_EVIDENCE_COVERAGE",
           severity: "warning",
           category: "evidence_quality",
-          label: "Some details lack source support",
-          description: "Other parts of the answer remain supported; some requested details are not in the current sources.",
+          label: "部分内容暂无资料支持",
+          description: "回答中的其余内容仍有资料支持；当前文档暂未提供问题中部分内容所需的信息。",
         }],
         evidence_coverage: {
           total: 4,
@@ -105,7 +105,8 @@ describe("analytics refresh", () => {
     render(<AnalyticsPage />);
 
     expect(await screen.findByText("Some details lack source support")).toHaveClass("warning");
-    expect(screen.getByText("3 of 4 answer points supported")).toBeInTheDocument();
-    expect(screen.getByText("Not found in current sources: Which business segments drove growth")).toBeInTheDocument();
+    expect(screen.queryByText("部分内容暂无资料支持")).not.toBeInTheDocument();
+    expect(screen.queryByText("3 of 4 answer points supported")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not found in current sources: Which business segments drove growth")).not.toBeInTheDocument();
   });
 });

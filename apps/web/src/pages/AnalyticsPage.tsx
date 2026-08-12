@@ -39,9 +39,18 @@ type EvidenceCoverage = {
 const LEGACY_WARNING_LABELS: Record<string, Pick<WarningDetail, "severity" | "label">> = {
   SYNTHETIC_DATA_SIGNAL: { severity: "info", label: "Document contains synthetic data" },
   INSUFFICIENT_EVIDENCE: { severity: "warning", label: "Insufficient evidence" },
+  PARTIAL_EVIDENCE_COVERAGE: { severity: "warning", label: "Some details lack source support" },
   QUERY_PLANNER_PROVIDER_ERROR: { severity: "degraded", label: "Query planning degraded" },
   LLM_PROVIDER_ERROR: { severity: "degraded", label: "Model generation degraded" },
 };
+
+const WARNING_LABEL_OVERRIDES: Record<string, string> = {
+  PARTIAL_EVIDENCE_COVERAGE: "Some details lack source support",
+};
+
+function warningLabel(warning: WarningDetail): string {
+  return WARNING_LABEL_OVERRIDES[warning.code] ?? warning.label;
+}
 
 function detailsFor(run: Analytics["recent_runs"][number]): WarningDetail[] {
   if (run.warning_details) return run.warning_details;
@@ -92,11 +101,7 @@ export function AnalyticsPage() {
             className={`run-signal ${warning.severity}`}
             key={warning.code}
             title={`${warning.description} (${warning.code})`}
-          >{warning.label}</span>)}
-        </div>}
-        {run.evidence_coverage?.has_gaps && <div className="run-coverage-detail" aria-label="Source support details">
-          <strong>{run.evidence_coverage.supported} of {run.evidence_coverage.total} answer points supported</strong>
-          <small>Not found in current sources: {run.evidence_coverage.gap_labels.join(" · ")}</small>
+          >{warningLabel(warning)}</span>)}
         </div>}
       </article>;
     })}{!data.recent_runs.length && <div className="empty">Run history will appear here after your first completed Q&A.</div>}</div>
