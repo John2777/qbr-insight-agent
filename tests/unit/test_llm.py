@@ -8,7 +8,7 @@ from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService
 from packages.qbr_core.foundation.config import Settings
-from packages.qbr_core.providers.llm import POLISHING_SYSTEM_PROMPT, EvidenceQAAgent, build_chat_model
+from packages.qbr_core.providers.llm import POLISHING_SYSTEM_PROMPT, SYSTEM_PROMPT, EvidenceQAAgent, build_chat_model
 
 
 class FakeModel:
@@ -178,6 +178,15 @@ def test_generation_prompt_uses_task_frame_without_fixed_summary_template(tmp_pa
     assert "语义任务框架" in prompt
     assert "固定使用“总体判断" not in prompt
     assert "negative_signal_summary" not in prompt
+
+
+def test_generation_policy_separates_trend_from_threshold_status_without_fixed_values() -> None:
+    assert "变化方向" in SYSTEM_PROMPT
+    assert "当前状态" in SYSTEM_PROMPT
+    assert "阈值/目标及比较方向" in SYSTEM_PROMPT
+    assert "当前仍在阈值内也不等于风险或关注点完全不存在" in SYSTEM_PROMPT
+    assert "香港" not in SYSTEM_PROMPT
+    assert "45%" not in SYSTEM_PROMPT
 
 
 def test_generation_prompt_marks_structured_summary_as_non_evidence(tmp_path: Path) -> None:

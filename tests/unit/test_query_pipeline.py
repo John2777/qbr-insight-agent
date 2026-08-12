@@ -10,6 +10,7 @@ from pytest import LogCaptureFixture
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.foundation.database import utc_now
 from packages.qbr_core.planning import QueryPlannerAgent, deterministic_plan
+from packages.qbr_core.planning.agent import PLANNER_SYSTEM_PROMPT
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, query_terms
 from packages.qbr_core.retrieval.evidence import EvidencePackBuilder, extract_relevant_quote
 
@@ -220,6 +221,23 @@ def test_llm_planner_accepts_multi_part_goal_without_collapsing_to_one_category(
     plan = QueryPlannerAgent(model).plan("请总结公司的优势和潜在问题。")
     assert plan.operations == ("synthesize strengths", "identify concerns", "state evidence boundaries")
     assert not hasattr(plan, "active_intents")
+
+
+def test_planner_policy_requests_decision_criteria_without_domain_specific_thresholds() -> None:
+    assert "every relevant current measure" in PLANNER_SYSTEM_PROMPT
+    assert "threshold/target and comparison direction" in PLANNER_SYSTEM_PROMPT
+    assert "movement toward a boundary" in PLANNER_SYSTEM_PROMPT
+    assert "Hong Kong" not in PLANNER_SYSTEM_PROMPT
+    assert "45%" not in PLANNER_SYSTEM_PROMPT
+
+
+def test_linguistic_fallback_adds_threshold_vocabulary_for_risk_concentration_question() -> None:
+    plan = deterministic_plan("某个区域增长后，组合是否已经形成集中风险？")
+    query_corpus = " ".join(item.text for item in plan.retrieval_queries).casefold()
+
+    assert "阈值" in query_corpus
+    assert "集中度" in query_corpus
+    assert "当前" in query_corpus
 
 
 def test_llm_planner_realigns_creation_drift_for_existing_chart_analysis() -> None:

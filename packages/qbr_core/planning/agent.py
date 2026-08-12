@@ -31,6 +31,11 @@ Return one JSON object with exactly these conceptual fields:
 
 Preserve every explicit year, quarter, market, metric, comparison target, and document constraint.
 For multi-part questions, describe every requested outcome in one task frame instead of assigning categories.
+For evaluative questions about risk, compliance, target attainment, limits, or whether a change has become
+material, plan the decision evidence explicitly: retrieve the observed change, every relevant current measure,
+its stated threshold/target and comparison direction. Keep movement toward a boundary separate from the
+current pass/breach status; do not infer that a worsening trend is already a breach, or that staying within a
+limit means there is no emerging concern.
 For chart requests, set needs_visuals=true and express the requested comparisons, trends, anomalies,
 cardinalities and time granularity in operations/evidence_requirements without guessing any series name.
 Preserve the user's requested action. Interpreting or analyzing an existing chart is not a request to

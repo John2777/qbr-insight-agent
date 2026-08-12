@@ -7,7 +7,10 @@ DOMAIN_EQUIVALENTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("profit", "earnings", "利润", "盈利"), "profit earnings 利润 盈利"),
     (("margin", "利润率", "价值率"), "margin rate 利润率 价值率"),
     (("growth", "增长", "增速"), "growth increase 增长 增速"),
-    (("risk", "风险"), "risk exposure warning 风险 暴露 预警"),
+    (
+        ("risk", "风险"),
+        "risk exposure warning threshold limit current trend 风险 暴露 预警 阈值 限额 当前 趋势",
+    ),
     (("capital", "资本"), "capital solvency buffer 资本 偿付能力 缓冲"),
     (("customer", "客户"), "customer retention persistency 客户 留存 继续率"),
     (("channel", "渠道"), "channel distribution productivity 渠道 分销 产能"),
@@ -44,6 +47,10 @@ LANGUAGE_BRIDGES: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("趋势", "变化", "比较", "对比", "trend", "change", "compare"),
         "trend change comparison period start latest 趋势 变化 比较 起始期 最新期",
+    ),
+    (
+        ("集中", "集中度", "concentration", "concentrated", "diversification"),
+        "concentration diversification mix share top current threshold 集中度 多元化 组合 占比 当前 阈值",
     ),
 )
 

@@ -33,8 +33,8 @@ HEADER_ALIASES: tuple[tuple[str, ...], ...] = (
     ("operatingroev", "营运roev"),
     ("evequity", "内含价值权益"),
     ("同比变化", "同比", "变化", "固定汇率", "cer"),
-    ("当前", "当前值"),
-    ("阈值",),
+    ("当前", "当前值", "current", "currentvalue"),
+    ("阈值", "threshold", "limit", "target"),
 )
 
 
@@ -133,6 +133,20 @@ def _condition_passes(current: str, condition: str) -> bool | None:
     return current_value == threshold_value
 
 
+def _requests_evaluation(question: str) -> bool:
+    """Detect decision wording without tying it to a metric or domain."""
+
+    return bool(
+        re.search(
+            r"(?:是否|能否|有没有|算不算|达标|满足|状态|闸门|风险|越线|突破|超出|合规|"
+            r"within\s+(?:the\s+)?(?:limit|threshold|target)|pass(?:es|ed)?|breach(?:es|ed)?|"
+            r"compliant|acceptable|material|risk)",
+            question,
+            flags=re.I,
+        )
+    )
+
+
 @dataclass(slots=True)
 class ParsedTable:
     """Provide normalized headers and rows for deterministic table reasoning."""
@@ -195,6 +209,12 @@ class ParsedTable:
         for term in ("矩阵", "阈值", "闸门", "合计", "最高", "最低", "最大", "最小"):
             if term in question and term in str(self.source.get("content", "")):
                 score += 2
+        header_keys = {_normalize(header) for header in self.headers}
+        has_current_and_threshold = bool(header_keys & {"当前", "当前值", "current", "currentvalue"}) and bool(
+            header_keys & {"阈值", "threshold", "limit", "target", "绿", "green"}
+        )
+        if has_current_and_threshold and _requests_evaluation(question):
+            score += 3
         return score
 
 
@@ -327,12 +347,18 @@ class TableReasoner:
 
     def _threshold(self, question: str, table: ParsedTable) -> str | None:
         """Extract a numeric threshold and comparison operator from the question."""
-        if not any(term in question for term in ("阈值", "达标", "满足", "状态", "闸门")):
+        if not _requests_evaluation(question):
             return None
         header_keys = [_normalize(header) for header in table.headers]
-        current_index = next((i for i, key in enumerate(header_keys) if key in {"当前", "当前值"}), None)
-        threshold_index = next((i for i, key in enumerate(header_keys) if key == "阈值"), None)
-        green_index = next((i for i, key in enumerate(header_keys) if key == "绿"), None)
+        current_index = next(
+            (i for i, key in enumerate(header_keys) if key in {"当前", "当前值", "current", "currentvalue"}),
+            None,
+        )
+        threshold_index = next(
+            (i for i, key in enumerate(header_keys) if key in {"阈值", "threshold", "limit", "target"}),
+            None,
+        )
+        green_index = next((i for i, key in enumerate(header_keys) if key in {"绿", "green"}), None)
         condition_index = threshold_index if threshold_index is not None else green_index
         if current_index is None or condition_index is None:
             return None
