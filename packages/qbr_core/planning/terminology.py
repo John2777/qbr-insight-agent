@@ -425,5 +425,15 @@ def find_term(question: str) -> TermDefinition | None:
     return definition if score >= 30 else None
 
 
+def mentioned_terms(text: str) -> tuple[TermDefinition, ...]:
+    """Return every approved term whose source-language alias occurs in text."""
+
+    return tuple(
+        definition
+        for definition in QBR_TERMS
+        if any(_alias_match(text, alias) is not None for alias in definition.search_aliases)
+    )
+
+
 def glossary_by_term() -> dict[str, TermDefinition]:
     return {definition.term.casefold(): definition for definition in QBR_TERMS}

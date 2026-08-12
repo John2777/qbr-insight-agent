@@ -17,6 +17,7 @@ def _row(
     document_id: str = "doc",
     document_title: str = "QBR",
     retrieval_score: float = 2.0,
+    slide_title: str = "",
 ) -> dict[str, object]:
     return {
         "id": row_id,
@@ -25,6 +26,7 @@ def _row(
         "document_title": document_title,
         "slide_id": f"slide_{slide_no}",
         "slide_no": slide_no,
+        "slide_title": slide_title,
         "chunk_type": chunk_type,
         "content": content,
         "retrieval_score": retrieval_score,
@@ -228,6 +230,25 @@ def test_attribution_requires_direct_driver_evidence_not_just_current_segment_si
         ],
     )
     driver = next(item for item in supported.coverage.facets if item.facet.kind == "driver_attribution")
+    assert driver.status == "supported"
+
+
+def test_chart_title_and_comparative_values_jointly_support_driver_attribution() -> None:
+    question = "同比增长主要来自哪些区域板块？"
+    plan = deterministic_plan(question)
+    pack = EvidencePackBuilder().build(
+        plan,
+        [
+            _row(
+                "regional_change",
+                "FY2024 | North=100; South=80\nFY2025 | North=140; South=90",
+                chunk_type="chart_series",
+                slide_title="区域组合增长来源",
+            )
+        ],
+    )
+
+    driver = next(item for item in pack.coverage.facets if item.facet.kind == "driver_attribution")
     assert driver.status == "supported"
 
 

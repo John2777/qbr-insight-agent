@@ -589,6 +589,8 @@ class TableReasoner:
                 row_matches = [(0, total)] if total else []
             if not row_matches:
                 return None
+        if len(row_matches) != 1:
+            return None
         columns = self._requested_columns(question, table)
         columns = [index for index in columns if index > 0 and _normalize(table.headers[index]) != "单位"]
         if not columns:

@@ -405,7 +405,11 @@ class EvidencePack:
                 else "No document evidence was retrieved for this answer."
             )
         heading = "已检索的编号证据：" if plan.answer_language == "zh" else "Retrieved numbered evidence:"
-        lines = [f"- {atom.quote} [{index}]" for index, atom in enumerate(self.atoms, 1)]
+        lines = []
+        for index, atom in enumerate(self.atoms, 1):
+            title = str(atom.source.get("slide_title") or "").strip()
+            context = f"{title} — {atom.quote}" if title and title.casefold() not in atom.quote.casefold() else atom.quote
+            lines.append(f"- {context} [{index}]")
         return heading + "\n\n" + "\n".join(lines)
 
     # Kept as a narrow compatibility alias for callers that expect a model-free

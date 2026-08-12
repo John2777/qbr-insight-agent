@@ -416,7 +416,8 @@ class FaissVectorStore:
             with self.db.read() as conn:
                 rows = conn.execute(
                     f"""
-                    SELECT ch.*,s.slide_no,e.bbox_json,e.confidence element_confidence,
+                    SELECT ch.*,s.slide_no,s.title slide_title,s.summary slide_summary,
+                      e.bbox_json,e.confidence element_confidence,
                       d.title document_title,d.id document_id,
                       ce.id embedding_id
                     FROM chunk_embeddings ce JOIN chunks ch ON ch.id=ce.chunk_id

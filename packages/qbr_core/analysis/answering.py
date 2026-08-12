@@ -10,6 +10,7 @@ from packages.qbr_core.analysis.charts.analyzer import ChartAnalyzer
 from packages.qbr_core.analysis.reconciliation import ScopeReconciler
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.planning import QueryPlan, RetrievalQuery, deterministic_plan
+from packages.qbr_core.planning.terminology import mentioned_terms
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, RetrievalResult
 from packages.qbr_core.retrieval.evidence import EvidencePack, EvidencePackBuilder
 from packages.qbr_core.skills.registry import SkillDescriptor, SkillRegistry
@@ -94,7 +95,17 @@ class DeterministicAnswerEngine:
         if calculation is None and not chart_rows:
             chart_rows = self._load_chart_rows(workspace_id, document_ids)
         if calculation is None:
-            calculation = self.chart_calculator.analyze(question, chart_rows)
+            analysis_question = " ".join(
+                dict.fromkeys(
+                    (
+                        question,
+                        task.canonical_question,
+                        task.task_summary,
+                        *(alias for term in mentioned_terms(question) for alias in term.search_aliases),
+                    )
+                )
+            )
+            calculation = self.chart_calculator.analyze(analysis_question, chart_rows)
         if calculation is None:
             preferred_element_ids = {
                 str(item.get("element_id") or "")
@@ -115,7 +126,11 @@ class DeterministicAnswerEngine:
             )
         if calculation is not None:
             pack = self.evidence_builder.with_additional_evidence(task, pack, calculation.evidence)
-        evidence = self._merge_evidence(calculation, pack.evidence)
+        evidence = self._merge_evidence(
+            calculation,
+            pack.evidence,
+            preserve_cross_scope=len(pack.coverage.facets) > 1,
+        )
         warnings = list(task.warnings)
         if not pack.answerable and calculation is None:
             warnings.append("INSUFFICIENT_EVIDENCE")
@@ -241,12 +256,14 @@ class DeterministicAnswerEngine:
     def _merge_evidence(
         calculation: VerifiedCalculation | None,
         pack_evidence: list[dict[str, Any]],
+        *,
+        preserve_cross_scope: bool = False,
     ) -> list[dict[str, Any]]:
-        """Merge evidence for this deterministic answer engine."""
+        """Merge evidence without letting one calculation erase other answer facets."""
         merged: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
         scoped_pack = pack_evidence
-        if calculation is not None:
+        if calculation is not None and not preserve_cross_scope:
             slide_id = str(calculation.scope.get("slide_id") or "")
             if slide_id:
                 scoped_pack = [item for item in pack_evidence if str(item.get("slide_id") or "") == slide_id]
@@ -276,7 +293,12 @@ class DeterministicAnswerEngine:
             label = "确定性计算结果" if plan.answer_language == "zh" else "Verified calculation"
             sections.append(f"{label}:\n{calculation.text}")
         evidence_label = "编号证据" if plan.answer_language == "zh" else "Numbered evidence"
-        lines = [f"[{index}] {item.get('quote', '')}" for index, item in enumerate(evidence, 1)]
+        lines = []
+        for index, item in enumerate(evidence, 1):
+            quote = str(item.get("quote") or "")
+            title = str(item.get("slide_title") or "").strip()
+            context = f"{title} — {quote}" if title and title.casefold() not in quote.casefold() else quote
+            lines.append(f"[{index}] {context}")
         sections.append(evidence_label + ":\n" + "\n".join(lines))
         return "\n\n".join(sections)
 
@@ -312,7 +334,7 @@ class DeterministicAnswerEngine:
                 "The current document scope did not yield enough evidence to answer this question."
             )
 
-        if calculation is not None and calculation.fallback_text:
+        if calculation is not None and calculation.fallback_text and len(pack.coverage.facets) == 1:
             if not pack.coverage.has_gaps:
                 return calculation.fallback_text
             gaps = pack.coverage.gap_labels[:3]

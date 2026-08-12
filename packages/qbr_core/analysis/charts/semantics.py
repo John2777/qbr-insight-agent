@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from packages.qbr_core.analysis.charts.structure import chart_family, is_temporal_category, series_groups
+from packages.qbr_core.analysis.charts.structure import chart_family, is_temporal_category, question_tokens, series_groups
 
 
 def normalize_dimension(value: object) -> str:
@@ -152,7 +152,13 @@ class ChartDataCube:
             self.rows[0].get("slide_summary"),
         )
         title_matches = sum(label_is_mentioned(value, question) for value in title_fields if value)
-        return series_matches * 8 + category_matches * 8 + title_matches * 2
+        query_terms = question_tokens(question)
+        title_term_matches = sum(
+            min(4, len(query_terms & question_tokens(str(value))))
+            for value in title_fields
+            if value
+        )
+        return series_matches * 8 + category_matches * 8 + title_matches * 2 + title_term_matches * 2
 
     def composition(self) -> dict[str, Any] | None:
         """Return compatible points for one part-to-whole category."""

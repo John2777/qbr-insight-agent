@@ -173,7 +173,8 @@ class EvidenceRetriever:
         with self.db.read() as conn:
             rows = conn.execute(
                 """
-                SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
+                SELECT ch.*,s.slide_no,s.title slide_title,s.summary slide_summary,
+                  e.bbox_json,d.title document_title,d.id document_id,
                   e.confidence element_confidence,0.0 AS lexical_rank
                 FROM chunks ch JOIN slides s ON s.id=ch.slide_id
                 JOIN document_versions dv ON dv.id=ch.document_version_id
@@ -497,7 +498,8 @@ class EvidenceRetriever:
             with self.db.read() as conn:
                 fetched = conn.execute(
                     f"""
-                    SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
+                    SELECT ch.*,s.slide_no,s.title slide_title,s.summary slide_summary,
+                      e.bbox_json,d.title document_title,d.id document_id,
                       e.confidence element_confidence,bm25(chunk_fts) AS lexical_rank
                     FROM chunk_fts JOIN chunks ch ON ch.id=chunk_fts.chunk_id
                     JOIN slides s ON s.id=ch.slide_id
@@ -518,7 +520,8 @@ class EvidenceRetriever:
         with self.db.read() as conn:
             fetched = conn.execute(
                 f"""
-                SELECT ch.*,s.slide_no,e.bbox_json,d.title document_title,d.id document_id,
+                SELECT ch.*,s.slide_no,s.title slide_title,s.summary slide_summary,
+                  e.bbox_json,d.title document_title,d.id document_id,
                   e.confidence element_confidence,100.0 AS lexical_rank
                 FROM chunks ch JOIN slides s ON s.id=ch.slide_id
                 JOIN document_versions dv ON dv.id=ch.document_version_id

@@ -325,6 +325,18 @@ def _evidence_view(item: Any, index: int) -> dict[str, Any]:
     }
 
 
+def _evidence_text(evidence: dict[str, Any]) -> str:
+    """Combine an evidence unit with its source-derived semantic context."""
+
+    values = (
+        evidence.get("quote") or evidence.get("content"),
+        evidence.get("chart_title"),
+        evidence.get("slide_title"),
+        evidence.get("slide_summary"),
+    )
+    return "\n".join(dict.fromkeys(str(value).strip() for value in values if str(value or "").strip()))
+
+
 def _is_related(facet: EvidenceFacet, text: str) -> bool:
     folded = text.casefold()
     aliases = _subject_aliases(facet.subject)
@@ -338,7 +350,7 @@ def _is_related(facet: EvidenceFacet, text: str) -> bool:
 
 
 def _fully_supports(facet: EvidenceFacet, evidence: dict[str, Any]) -> bool:
-    text = str(evidence.get("quote") or evidence.get("content") or "")
+    text = _evidence_text(evidence)
     folded = text.casefold()
     if not _is_related(facet, folded):
         return False
@@ -376,7 +388,7 @@ def evaluate_evidence_coverage(
     rows = [_evidence_view(item, index) for index, item in enumerate(evidence, 1)]
     results: list[FacetCoverage] = []
     for facet in contract:
-        related = [row for row in rows if _is_related(facet, str(row.get("quote") or row.get("content") or ""))]
+        related = [row for row in rows if _is_related(facet, _evidence_text(row))]
         supporting = [row for row in related if _fully_supports(facet, row)]
         reliable = [
             row

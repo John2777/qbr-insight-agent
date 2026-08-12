@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from packages.qbr_core.analysis.charts.semantics import ChartDataCube, chart_cubes, normalize_dimension, units_compatible
-from packages.qbr_core.analysis.charts.structure import chart_scopes
+from packages.qbr_core.analysis.charts.structure import chart_scopes, is_temporal_category
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +60,7 @@ def _point_evidence(
         "document_title": row.get("document_title"),
         "slide_no": row.get("slide_no"),
         "slide_title": row.get("slide_title"),
+        "slide_summary": row.get("slide_summary"),
         "content_role": "chart",
         "facet": "verified calculation",
         "extraction": "native_chart_calculation",
@@ -83,6 +84,18 @@ _COMPLEMENT_CUES = ("非", "其余", "剩余", "之外", "other", "remaining", "
 _STEP_CUES = ("单步", "逐步", "阶段", "路径", "step", "path", "bridge")
 _ADVERSE_CUES = ("拖累", "下降", "减少", "降幅", "decline", "decrease", "drag", "drop")
 _EXTREME_CUES = ("最大", "最主要", "largest", "biggest", "most")
+_DRIVER_CUES = (
+    "主要来自",
+    "增长来源",
+    "贡献增长",
+    "增长贡献",
+    "驱动",
+    "归因",
+    "contribut",
+    "driv",
+    "mainly from",
+    "attribut",
+)
 
 
 def _contains_any(question: str, cues: tuple[str, ...]) -> bool:
@@ -108,6 +121,55 @@ def _comparison_order(question: str, labels: tuple[str, ...]) -> tuple[str, str]
     if "比" in between or re.search(r"\bthan\b", between):
         return ordered[1], ordered[0]
     return ordered[0], ordered[1]
+
+
+def _temporal_sort_key(label: str) -> tuple[int, ...]:
+    values = tuple(int(value) for value in re.findall(r"\d+", label))
+    return values or (0,)
+
+
+def _period_coordinate(label: str) -> tuple[int, str] | None:
+    folded = label.strip().casefold()
+    year_match = re.search(r"(?:fy|cy)?(20\d{2})", folded)
+    if year_match:
+        year = int(year_match.group(1))
+    else:
+        short_match = re.match(r"(\d{2})[/.-](\d{1,2})$", folded)
+        if not short_match:
+            return None
+        year = 2000 + int(short_match.group(1))
+    quarter = re.search(r"q([1-4])", folded)
+    month = re.search(r"[/.-](\d{1,2})$", folded)
+    suffix = f"q{quarter.group(1)}" if quarter else f"m{int(month.group(1)):02d}" if month else "annual"
+    return year, suffix
+
+
+def _year_over_year_pair(question: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    indexed = [(_period_coordinate(str(row.get("category") or "")), row) for row in rows]
+    indexed = [(coordinate, row) for coordinate, row in indexed if coordinate is not None]
+    if len(indexed) < 2:
+        return []
+    explicit_years = [int(value) for value in re.findall(r"(?:FY|CY)?(20\d{2})", question, flags=re.I)]
+    if explicit_years:
+        target_year = max(explicit_years)
+    else:
+        context = " ".join(
+            str(rows[0].get(key) or "")
+            for key in ("document_title", "slide_title", "chart_title")
+        )
+        context_years = [int(value) for value in re.findall(r"(?:FY|CY)?(20\d{2})", context, flags=re.I)]
+        target_year = max(context_years) if context_years else max(coordinate[0] for coordinate, _row in indexed)
+    by_coordinate = {coordinate: row for coordinate, row in indexed}
+    target_candidates = sorted(
+        (coordinate for coordinate, _row in indexed if coordinate[0] == target_year),
+        key=lambda coordinate: coordinate[1],
+        reverse=True,
+    )
+    for coordinate in target_candidates:
+        baseline_coordinate = (target_year - 1, coordinate[1])
+        if baseline_coordinate in by_coordinate:
+            return [by_coordinate[baseline_coordinate], by_coordinate[coordinate]]
+    return []
 
 
 def _calculation_scope(cube: ChartDataCube, operation: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -156,6 +218,7 @@ class ChartCalculator:
         )
         candidates: list[tuple[int, VerifiedCalculation]] = []
         operations = (
+            self._group_change_attribution,
             self._cross_dimension_change,
             self._share_composition,
             self._path_attribution,
@@ -184,7 +247,120 @@ class ChartCalculator:
                         break
                     candidates.append((relevance * 10 + (len(operations) - priority), result))
                     break
-        return max(candidates, key=lambda item: item[0])[1] if candidates else None
+        if not candidates:
+            return None
+        ordered_candidates = sorted(candidates, key=lambda item: item[0], reverse=True)
+        selected: list[VerifiedCalculation] = []
+        seen: set[tuple[str, tuple[str, ...]]] = set()
+        for _score, result in ordered_candidates:
+            key = (
+                str(result.scope.get("operation") or result.kind),
+                tuple(str(value) for value in result.scope.get("series_names", [])),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(result)
+        if len(selected) == 1:
+            return selected[0]
+        return VerifiedCalculation(
+            text="\n".join(result.text for result in selected),
+            evidence=tuple(item for result in selected for item in result.evidence),
+            facts=tuple(item for result in selected for item in result.facts),
+            kind="composite_calculation",
+            scope={
+                "kind": "composite_calculation",
+                "operation": "composite",
+                "components": [result.scope for result in selected],
+            },
+            fallback_text="\n".join(result.fallback_text or result.text for result in selected),
+        )
+
+    @staticmethod
+    def _group_change_attribution(question: str, cube: ChartDataCube) -> VerifiedCalculation | None:
+        """Attribute a total change across comparable categories to their members."""
+
+        if not _contains_any(question, _DRIVER_CUES):
+            return None
+        temporal_series = tuple(name for name in cube.series_names if is_temporal_category(name))
+        if len(temporal_series) < 2:
+            return None
+        mentioned = cube.mentioned_series(question)
+        mentioned_temporal = tuple(name for name in mentioned if name in temporal_series)
+        if len(mentioned_temporal) >= 2:
+            order = _comparison_order(question, mentioned_temporal)
+        else:
+            ordered = sorted(temporal_series, key=_temporal_sort_key)
+            order = (ordered[-2], ordered[-1])
+        if order is None:
+            return None
+
+        baseline_name, target_name = order
+        baseline = {
+            normalize_dimension(row.get("category")): row
+            for row in cube.series_rows(baseline_name)
+            if normalize_dimension(row.get("category"))
+        }
+        target = {
+            normalize_dimension(row.get("category")): row
+            for row in cube.series_rows(target_name)
+            if normalize_dimension(row.get("category"))
+        }
+        shared = [key for key in baseline if key in target]
+        rows = [row for key in shared for row in (baseline[key], target[key])]
+        if len(shared) < 2 or not units_compatible(rows):
+            return None
+
+        changes = [
+            {
+                "category": str(target[key].get("category") or baseline[key].get("category") or ""),
+                "baseline": float(baseline[key]["y_value"]),
+                "target": float(target[key]["y_value"]),
+                "change": float(target[key]["y_value"]) - float(baseline[key]["y_value"]),
+            }
+            for key in shared
+        ]
+        net_change = sum(float(item["change"]) for item in changes)
+        positive = sorted(
+            (item for item in changes if float(item["change"]) > 0),
+            key=lambda item: (-float(item["change"]), str(item["category"])),
+        )
+        if not positive or net_change <= 0 or math.isclose(net_change, 0.0, abs_tol=1e-12):
+            return None
+        for item in changes:
+            item["share_of_net_change_percent"] = float(item["change"]) / net_change * 100
+
+        primary: list[dict[str, Any]] = []
+        cumulative_share = 0.0
+        for item in positive:
+            primary.append(item)
+            cumulative_share += float(item["share_of_net_change_percent"])
+            if cumulative_share >= 80.0 or len(primary) >= 3:
+                break
+        primary_names = ", ".join(str(item["category"]) for item in primary)
+        details = "; ".join(
+            f"{item['category']}={float(item['change']):+g} "
+            f"({float(item['share_of_net_change_percent']):.1f}% of net change)"
+            for item in sorted(changes, key=lambda item: -float(item["change"]))
+        )
+        text = (
+            f"Segment growth contribution from {baseline_name} to {target_name}: net change={net_change:+g}; "
+            f"primary contributors={primary_names}. {details}. [1]"
+        )
+        facts = (
+            {
+                "operation": "group_change_attribution",
+                "baseline_series": baseline_name,
+                "target_series": target_name,
+                "net_change": net_change,
+                "contributions": changes,
+                "primary_contributors": [str(item["category"]) for item in primary],
+                "basis": "derived_from_chart_points",
+            },
+        )
+        scope = _calculation_scope(cube, "group_change_attribution", rows)
+        evidence = _bundle_evidence(cube, rows, operation="group_change_attribution", quote=text.removesuffix(" [1]"))
+        return VerifiedCalculation(text, (evidence,), facts, scope=scope, fallback_text=text)
 
     @staticmethod
     def _point_lookup(question: str, cube: ChartDataCube) -> VerifiedCalculation | None:
@@ -219,6 +395,8 @@ class ChartCalculator:
         if len(mentioned_categories) >= 2:
             order = _comparison_order(question, mentioned_categories)
             pair = [cube.point(mentioned_series[0], category) for category in order or ()]
+        elif _contains_any(question, ("同比", "year-over-year", "year over year", "yoy")):
+            pair = _year_over_year_pair(question, ordered)
         else:
             pair = ordered[-2:]
         if len(pair) != 2 or any(row is None for row in pair):

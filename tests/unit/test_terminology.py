@@ -5,7 +5,7 @@ from pathlib import Path
 
 from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.planning import deterministic_plan
-from packages.qbr_core.planning.terminology import QBR_TERMS, find_term, glossary_by_term
+from packages.qbr_core.planning.terminology import QBR_TERMS, find_term, glossary_by_term, mentioned_terms
 
 ROOT = Path(__file__).parents[2]
 
@@ -23,6 +23,12 @@ def test_terminology_rule_adds_retrieval_vocabulary_without_answering() -> None:
     assert "VONB" in corpus and "新业务价值" in corpus
     assert "香港" not in corpus and "2,256" not in corpus
     assert not hasattr(plan, "intent")
+
+
+def test_mentioned_terms_exposes_all_metric_aliases_without_definition_wording() -> None:
+    terms = {item.term for item in mentioned_terms("VONB、OPAT和新业务价值率分别同比增长多少？")}
+
+    assert {"VONB", "OPAT", "VONB Margin", "YoY"} <= terms
 
 
 def test_term_question_without_documents_uses_evidence_boundary_not_curated_answer_template(tmp_path: Path) -> None:
