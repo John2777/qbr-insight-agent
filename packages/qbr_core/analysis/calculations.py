@@ -60,6 +60,7 @@ def _point_evidence(
         "document_title": row.get("document_title"),
         "slide_no": row.get("slide_no"),
         "slide_title": row.get("slide_title"),
+        "chart_title": row.get("chart_title"),
         "slide_summary": row.get("slide_summary"),
         "content_role": "chart",
         "facet": "verified calculation",

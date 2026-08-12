@@ -527,7 +527,7 @@ class EvidencePackBuilder:
         missing_documents = tuple(document_id for document_id in plan.document_ids if document_id not in covered_documents)
         minimum_atoms = 2 if plan.execution_profile == "deep" else 1
         answerable = len(atoms) >= minimum_atoms
-        contract = build_evidence_contract(plan.original_question)
+        contract = build_evidence_contract(plan)
         coverage = evaluate_evidence_coverage(contract, atoms)
         facet_ids = facet_ids_for_evidence(coverage)
         atoms = [replace(atom, facet_ids=facet_ids.get(atom.atom_id, ())) for atom in atoms]
@@ -560,7 +560,7 @@ class EvidencePackBuilder:
 
         additional = list(evidence)
         coverage = evaluate_evidence_coverage(
-            build_evidence_contract(plan.original_question, tool_evidence=additional),
+            build_evidence_contract(plan),
             [*pack.atoms, *additional],
         )
         facet_ids = facet_ids_for_evidence(coverage)

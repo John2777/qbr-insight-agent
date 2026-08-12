@@ -137,6 +137,16 @@ def test_language_fallback_builds_task_frame_without_intent_labels() -> None:
     assert "优势" in query_corpus and "风险" in query_corpus
 
 
+def test_language_fallback_expands_open_ended_operating_questions() -> None:
+    plan = deterministic_plan("请问公司经营情况怎么样")
+    query_corpus = " ".join(item.text for item in plan.retrieval_queries).casefold()
+
+    assert "revenue" in query_corpus
+    assert "profitability" in query_corpus
+    assert "capital" in query_corpus
+    assert "运营" in query_corpus
+
+
 def test_language_fallback_preserves_hard_constraints_without_classifying() -> None:
     plan = deterministic_plan("How did sales perform in Q2 2025?")
     assert plan.hard_constraints == ("2025", "Q2")
@@ -151,6 +161,11 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
                 "canonical_question": "Evaluate Q2 2025 sales against prior period and target",
                 "task_summary": "Explain Q2 2025 sales performance and its drivers.",
                 "answer_brief": "Lead with the result, then compare the relevant periods and explain supported drivers.",
+                "delivery_requirements": [
+                    "state Q2 2025 sales performance",
+                    "compare it with the prior period and target",
+                    "explain documented drivers",
+                ],
                 "operations": ["compare periods", "explain drivers"],
                 "evidence_requirements": ["Q2 2025 sales", "prior-period comparator", "documented drivers"],
                 "retrieval_queries": [
@@ -175,6 +190,11 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
     assert plan.planner == "llm_semantic"
     assert plan.task_summary.startswith("Explain Q2 2025")
     assert plan.operations == ("compare periods", "explain drivers")
+    assert plan.delivery_requirements == (
+        "state Q2 2025 sales performance",
+        "compare it with the prior period and target",
+        "explain documented drivers",
+    )
     assert plan.execution_profile == "deep"
     assert plan.hard_constraints == ("2025", "Q2")
     assert plan.retrieval_queries[0].kind == "literal"

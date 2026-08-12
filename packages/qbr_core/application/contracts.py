@@ -125,7 +125,7 @@ class RunMetadata:
     verification: dict[str, Any]
     conversation_context: dict[str, Any]
     calculation: dict[str, Any] = field(default_factory=dict)
-    pipeline_version: str = "semantic-task-frame-v3-polished"
+    pipeline_version: str = "delivery-requirement-contract-v4"
 
     def to_dict(self) -> dict[str, Any]:
         """Return metadata in the persisted message schema."""

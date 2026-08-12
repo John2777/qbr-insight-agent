@@ -11,6 +11,7 @@ from packages.qbr_core.analysis.reconciliation import ScopeReconciler
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.planning import QueryPlan, RetrievalQuery, deterministic_plan
 from packages.qbr_core.planning.terminology import mentioned_terms
+from packages.qbr_core.retrieval.coverage import tool_evidence_fully_answers
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, RetrievalResult
 from packages.qbr_core.retrieval.evidence import EvidencePack, EvidencePackBuilder
 from packages.qbr_core.skills.registry import SkillDescriptor, SkillRegistry
@@ -129,7 +130,14 @@ class DeterministicAnswerEngine:
         evidence = self._merge_evidence(
             calculation,
             pack.evidence,
-            preserve_cross_scope=len(pack.coverage.facets) > 1,
+            preserve_cross_scope=bool(
+                calculation is not None
+                and not tool_evidence_fully_answers(
+                    task,
+                    calculation.evidence,
+                    tool_kind=calculation.kind,
+                )
+            ),
         )
         warnings = list(task.warnings)
         if not pack.answerable and calculation is None:
@@ -334,7 +342,15 @@ class DeterministicAnswerEngine:
                 "The current document scope did not yield enough evidence to answer this question."
             )
 
-        if calculation is not None and calculation.fallback_text and len(pack.coverage.facets) == 1:
+        if (
+            calculation is not None
+            and calculation.fallback_text
+            and tool_evidence_fully_answers(
+                plan,
+                calculation.evidence,
+                tool_kind=calculation.kind,
+            )
+        ):
             if not pack.coverage.has_gaps:
                 return calculation.fallback_text
             gaps = pack.coverage.gap_labels[:3]

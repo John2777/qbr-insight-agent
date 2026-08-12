@@ -63,6 +63,17 @@ def _references_visual(question: str) -> bool:
     )
 
 
+def _delivery_requirements(question: str) -> tuple[str, ...]:
+    """Preserve independently answerable user outcomes without naming an intent."""
+
+    clauses = [
+        item.strip(" ,，")
+        for item in re.split(r"[?？!！;；。]+", question)
+        if item.strip(" ,，")
+    ]
+    return tuple(dict.fromkeys(clauses)) or (question,)
+
+
 def _linguistic_expansions(question: str) -> list[RetrievalQuery]:
     """Add vocabulary bridges without deciding what kind of question this is."""
     folded = question.casefold()
@@ -123,6 +134,7 @@ def linguistic_plan(question: str, document_ids: Iterable[str] = ()) -> QueryPla
         document_ids=tuple(document_ids),
         retrieval_queries=queries,
         hard_constraints=constraints,
+        delivery_requirements=_delivery_requirements(question),
         evidence_requirements=requirements,
         needs_visuals=_references_visual(question),
         planner_confidence=0.35,

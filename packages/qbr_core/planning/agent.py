@@ -21,6 +21,8 @@ Return one JSON object with exactly these conceptual fields:
 - canonical_question: a context-resolved version of the request
 - task_summary: one sentence describing the outcome the user wants
 - answer_brief: specific instructions for how the final answer should address this request
+- delivery_requirements: 1-8 independently answerable outcomes that together complete the user's request;
+  write natural-language outcomes, never category or intent labels
 - operations: a short list of natural-language actions needed to complete the task
 - evidence_requirements: a short list describing the evidence needed to support the answer
 - retrieval_queries: 1-5 concise objects with text, kind and optional weight
@@ -30,7 +32,9 @@ Return one JSON object with exactly these conceptual fields:
 - planner_confidence: number from 0 to 1
 
 Preserve every explicit year, quarter, market, metric, comparison target, and document constraint.
-For multi-part questions, describe every requested outcome in one task frame instead of assigning categories.
+For multi-part or broad synthesis questions, put every independently answerable outcome in
+delivery_requirements. The list is the completeness contract: do not collapse multiple requested outcomes into
+one generic item, and do not invent preset business dimensions that the question or document vocabulary does not support.
 For evaluative questions about risk, compliance, target attainment, limits, or whether a change has become
 material, plan the decision evidence explicitly: retrieve the observed change, every relevant current measure,
 its stated threshold/target and comparison direction. Keep movement toward a boundary separate from the
@@ -64,7 +68,9 @@ def _contains_creation_action(*values: str) -> bool:
     return any(_CREATION_ACTION.search(value) for value in values if value)
 
 
-def _analysis_action_frame(baseline: QueryPlan) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+def _analysis_action_frame(
+    baseline: QueryPlan,
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """Build a language-matched action frame that preserves analysis semantics."""
 
     if baseline.answer_language == "zh":
@@ -72,6 +78,7 @@ def _analysis_action_frame(baseline: QueryPlan) -> tuple[str, str, tuple[str, ..
             baseline.original_question,
             "解读现有证据，先给出核心判断，再说明结构、变化、异常或分化；将事实、推断和证据边界分开。",
             ("识别用户指定的现有证据", "比较结构、变化与异常", "形成有依据的推断并说明验证边界"),
+            ("说明现有证据的结构、变化和异常", "给出有证据的判断并说明边界"),
             ("用户指定对象的直接证据", "支持结构、变化与异常判断的可核验数据"),
         )
     return (
@@ -82,6 +89,10 @@ def _analysis_action_frame(baseline: QueryPlan) -> tuple[str, str, tuple[str, ..
             "identify the existing evidence requested",
             "compare structure, changes and anomalies",
             "draw bounded inferences and state validation limits",
+        ),
+        (
+            "explain the structure, changes and anomalies in the existing evidence",
+            "give supported findings and state their limits",
         ),
         ("direct evidence for the requested object", "verifiable data supporting structure, change and anomaly findings"),
     )
@@ -295,9 +306,13 @@ class QueryPlannerAgent:
         task_summary = re.sub(r"\s+", " ", str(payload.get("task_summary") or baseline.task_summary)).strip()[:800]
         answer_brief = re.sub(r"\s+", " ", str(payload.get("answer_brief") or baseline.answer_brief)).strip()[:1200]
         operations = _clean_list(payload.get("operations"), limit=8, item_limit=160) or baseline.operations
+        delivery_requirements = (
+            _clean_list(payload.get("delivery_requirements"), limit=8, item_limit=240)
+            or baseline.delivery_requirements
+        )
         requirements = _clean_list(payload.get("evidence_requirements"), limit=8, item_limit=240) or baseline.evidence_requirements
         if action_realigned:
-            task_summary, answer_brief, operations, requirements = _analysis_action_frame(baseline)
+            task_summary, answer_brief, operations, delivery_requirements, requirements = _analysis_action_frame(baseline)
             canonical = baseline.original_question
         profile = str(payload.get("execution_profile") or "focused").strip().casefold()
         if profile not in {"focused", "analytical", "deep"}:
@@ -313,6 +328,7 @@ class QueryPlannerAgent:
             answer_brief=answer_brief,
             execution_profile=profile,
             retrieval_queries=queries,
+            delivery_requirements=delivery_requirements,
             evidence_requirements=requirements,
             operations=operations,
             needs_visuals=bool(payload.get("needs_visuals", baseline.needs_visuals)),

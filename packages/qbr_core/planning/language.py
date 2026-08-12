@@ -25,7 +25,20 @@ LANGUAGE_BRIDGES: tuple[tuple[tuple[str, ...], str], ...] = (
         "executive summary key facts metrics drivers risks actions 执行摘要 核心事实 指标 驱动 风险 行动",
     ),
     (
-        ("表现如何", "情况如何", "业绩", "performance", "how is", "how did"),
+        (
+            "表现如何",
+            "情况如何",
+            "经营情况",
+            "经营状况",
+            "经营表现",
+            "业务情况",
+            "业绩",
+            "performance",
+            "how is",
+            "how did",
+            "how is the business",
+            "how is the company doing",
+        ),
         "performance results revenue margin growth profitability cash capital operations 业绩 营收 利润率 增长 盈利 现金 资本 运营",
     ),
     (

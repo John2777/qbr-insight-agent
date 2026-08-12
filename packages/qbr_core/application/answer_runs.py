@@ -77,6 +77,7 @@ class AnswerRunExecutor:
                         "task_summary": plan.task_summary,
                         "answer_brief": plan.answer_brief,
                         "operations": list(plan.operations),
+                        "delivery_requirements": list(plan.delivery_requirements),
                         "evidence_requirements": list(plan.evidence_requirements),
                         "planner_confidence": plan.planner_confidence,
                         "profile": plan.execution_profile,

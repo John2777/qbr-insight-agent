@@ -40,6 +40,7 @@ class QueryPlan:
     document_ids: tuple[str, ...]
     retrieval_queries: tuple[RetrievalQuery, ...]
     hard_constraints: tuple[str, ...] = ()
+    delivery_requirements: tuple[str, ...] = ("answer the user's request",)
     evidence_requirements: tuple[str, ...] = ("directly relevant evidence",)
     operations: tuple[str, ...] = ("answer from evidence",)
     allowed_content_roles: tuple[str, ...] = (
@@ -71,6 +72,7 @@ class QueryPlan:
             "document_ids": list(self.document_ids),
             "retrieval_queries": [item.to_dict() for item in self.retrieval_queries],
             "hard_constraints": list(self.hard_constraints),
+            "delivery_requirements": list(self.delivery_requirements),
             "evidence_requirements": list(self.evidence_requirements),
             "operations": list(self.operations),
             "allowed_content_roles": list(self.allowed_content_roles),

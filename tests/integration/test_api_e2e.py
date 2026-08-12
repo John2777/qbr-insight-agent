@@ -129,7 +129,7 @@ def test_multi_part_coverage_is_exposed_end_to_end_and_not_hidden_by_calculation
         assert coverage["total"] == 3
         assert coverage["supported"] == 2
         assert coverage["gap_labels"] == ["Which product lines drive growth"]
-        assert coverage["facets"][-1]["status"] == "unsupported"
+        assert coverage["facets"][-1]["status"] == "partial"
         assert "The current sources do not yet support: Which product lines drive growth" in run["message"]["content"]
 
         recent = client.get("/api/v1/analytics/summary").json()["recent_runs"][0]

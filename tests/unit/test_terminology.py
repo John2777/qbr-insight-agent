@@ -43,9 +43,9 @@ def test_term_question_without_documents_uses_evidence_boundary_not_curated_answ
     assert "没有检索到" in run["message"]["content"]
     assert run["citations"] == []
     assert run["message"]["metadata"]["knowledge_source"] == "document_evidence"
-    assert run["message"]["metadata"]["pipeline_version"] == "semantic-task-frame-v3-polished"
+    assert run["message"]["metadata"]["pipeline_version"] == "delivery-requirement-contract-v4"
     assert "intent" not in run["message"]["metadata"]["query_plan"]
-    assert history["messages"][-1]["metadata"]["pipeline_version"] == "semantic-task-frame-v3-polished"
+    assert history["messages"][-1]["metadata"]["pipeline_version"] == "delivery-requirement-contract-v4"
     assert run["model"]["status"] == "disabled"
 
 
