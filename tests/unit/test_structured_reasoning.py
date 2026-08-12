@@ -659,9 +659,7 @@ def test_chart_selection_uses_generic_cardinality_and_granularity_signature() ->
         *_structural_scope_rows(slide_id="eight_by_twenty_four", slide_no=8, family="lineChart", series_count=8, point_count=24),
     ]
     question = "请分析8条折线、24个月的数据走势"
-
     result = ChartAnalyzer().analyze(question, rows, plan=deterministic_plan(question))
-
     assert result is not None
     assert result.scope["slide_id"] == "eight_by_twenty_four"
     assert result.scope["request_signature"]["series_counts"]
@@ -682,9 +680,7 @@ def test_llm_visual_structure_overrides_ambiguous_surface_numbers() -> None:
         visual_structure={"series_group_counts": [5], "point_counts": [8], "chart_families": ["bar"]},
         planner="llm_semantic",
     )
-
     result = ChartAnalyzer().analyze(question, rows, plan=plan)
-
     assert result is not None
     assert result.scope["slide_id"] == "five_by_eight"
 

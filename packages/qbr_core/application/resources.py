@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from packages.qbr_core.application.component import ServiceComponent
+from packages.qbr_core.application.persistence import ParsedPersistenceService
+from packages.qbr_core.application.purge import DocumentPurgeService
 from packages.qbr_core.application.warnings import warning_codes_by_severity, warning_details
 from packages.qbr_core.documents.parser import thumbnail_path_for
-from packages.qbr_core.foundation.database import utc_now
+from packages.qbr_core.foundation.database import Database, utc_now
 from packages.qbr_core.foundation.errors import Conflict, InvalidState, ResourceNotFound
 from packages.qbr_core.foundation.identifiers import new_id
 from packages.qbr_core.foundation.serialization import _loads
+from packages.qbr_core.retrieval.engine import EvidenceRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +32,30 @@ def _analytics_run(row: Any) -> dict[str, Any]:
     return item
 
 
-class ResourceService(ServiceComponent):
+class ResourceService:
     """Expose workspace-scoped documents, jobs, reviews, and analytics."""
+
+    def __init__(
+        self,
+        *,
+        db: Database,
+        document_purges: DocumentPurgeService,
+        retriever: EvidenceRetriever,
+        persistence: ParsedPersistenceService,
+    ) -> None:
+        """Initialize resource operations with explicit collaborators."""
+        self.db = db
+        self.document_purges = document_purges
+        self.retriever = retriever
+        self.persistence = persistence
+
+    def _job_event(self, conn: sqlite3.Connection, job_id: str, event_type: str, data: dict[str, Any]) -> None:
+        """Persist an ingestion event within the caller's transaction."""
+        conn.execute(
+            "INSERT INTO job_events(job_id,event_type,data_json,created_at) VALUES (?,?,?,?)",
+            (job_id, event_type, self.db.json(data), utc_now()),
+        )
+
     def list_documents(self, workspace_id: str) -> list[dict[str, Any]]:
         """Return active documents visible to a workspace."""
         with self.db.read() as conn:
@@ -372,7 +397,7 @@ class ResourceService(ServiceComponent):
                        WHERE id=?""",
                     (self.db.json(corrected_payload), corrected_payload.get("title"), row["element_id"]),
                 )
-                self._insert_chart(
+                self.persistence.insert_chart(
                     conn,
                     {"workspace_id": workspace_id, "version_id": row["version_id"]},
                     row["slide_id"],

@@ -8,7 +8,15 @@ from typing import TYPE_CHECKING, Any
 
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.retrieval.evidence import classify_content_role
+from packages.qbr_core.retrieval.ranking import LexicalRanker, ReciprocalRankFusion, SemanticRerankPolicy
 from packages.qbr_core.retrieval.reranking import Reranker
+from packages.qbr_core.retrieval.strategies import (
+    FtsRetrievalStrategy,
+    HybridRetrievalStrategy,
+    RetrievalCandidates,
+    RetrievalStrategy,
+    VectorRetrievalStrategy,
+)
 from packages.qbr_core.retrieval.vector_store import VectorSearchBackend
 
 if TYPE_CHECKING:
@@ -110,6 +118,22 @@ class EvidenceRetriever:
         self.reranker = reranker
         self.rerank_candidate_k = rerank_candidate_k
         self.rerank_top_n = rerank_top_n
+        self.lexical_ranker = LexicalRanker()
+        self.fusion = ReciprocalRankFusion(
+            k=rrf_k,
+            lexical_weight=lexical_weight,
+            vector_weight=vector_weight,
+        )
+        self.rerank_policy = SemanticRerankPolicy(
+            reranker,
+            candidate_k=rerank_candidate_k,
+            top_n=rerank_top_n,
+        )
+        self.strategies: dict[str, RetrievalStrategy] = {
+            "fts": FtsRetrievalStrategy(),
+            "vector": VectorRetrievalStrategy(),
+            "hybrid": HybridRetrievalStrategy(self.fusion),
+        }
 
     @property
     def vector_available(self) -> bool:
@@ -205,7 +229,7 @@ class EvidenceRetriever:
     ) -> RetrievalResult:
         """Search the available evidence under the requested scope."""
         selected_strategy = strategy or self.mode
-        if selected_strategy not in {"fts", "vector", "hybrid"}:
+        if selected_strategy not in self.strategies:
             raise ValueError("strategy must be fts, vector, or hybrid")
         lexical_rows, lexical_strategy, query = self._lexical_search(
             question,
@@ -213,15 +237,9 @@ class EvidenceRetriever:
             document_ids,
             limit=max(top_k, self.lexical_candidate_k),
         )
-        if selected_strategy == "fts":
-            rows, diagnostics = self._semantic_rerank(question, lexical_rows, top_k, enabled=_apply_rerank)
-            return RetrievalResult(
-                self._select_diverse(rows, top_k, len(document_ids), question), lexical_strategy, query, diagnostics
-            )
-
         vector_rows: list[dict[str, Any]] = []
         vector_error: str | None = None
-        if self.vector_store is not None:
+        if selected_strategy != "fts" and self.vector_store is not None:
             try:
                 vector_rows = self.vector_store.search(
                     question,
@@ -232,7 +250,7 @@ class EvidenceRetriever:
             except Exception as exc:  # vector search must never take down lexical QA
                 vector_error = type(exc).__name__
                 logger.warning("Vector retrieval failed; falling back to lexical search", exc_info=True)
-        else:
+        elif selected_strategy != "fts":
             vector_error = "VECTOR_BACKEND_UNAVAILABLE"
 
         diagnostics = {
@@ -243,33 +261,25 @@ class EvidenceRetriever:
         if vector_error:
             diagnostics["vector_error"] = vector_error
 
-        if selected_strategy == "vector" and vector_rows:
-            for row in vector_rows:
-                row["retrieval_score"] = round(float(row.get("vector_score") or 0.0), 6)
-            rows, diagnostics = self._semantic_rerank(question, vector_rows, top_k, diagnostics, enabled=_apply_rerank)
-            return RetrievalResult(
-                self._select_diverse(rows, top_k, len(document_ids), question),
-                f"vector:{self.vector_backend}", query, diagnostics,
+        selection = self.strategies[selected_strategy].select(
+            RetrievalCandidates(
+                lexical=lexical_rows,
+                vector=vector_rows,
+                lexical_label=lexical_strategy,
+                vector_backend=self.vector_backend,
+                fusion_limit=max(top_k, self.lexical_candidate_k),
             )
-        if not vector_rows:
-            fallback = f"{lexical_strategy}+vector_fallback"
-            rows, diagnostics = self._semantic_rerank(question, lexical_rows, top_k, diagnostics, enabled=_apply_rerank)
-            return RetrievalResult(
-                self._select_diverse(rows, top_k, len(document_ids), question), fallback, query, diagnostics
-            )
-        if not lexical_rows:
-            for row in vector_rows:
-                row["retrieval_score"] = round(float(row.get("vector_score") or 0.0), 6)
-            rows, diagnostics = self._semantic_rerank(question, vector_rows, top_k, diagnostics, enabled=_apply_rerank)
-            return RetrievalResult(
-                self._select_diverse(rows, top_k, len(document_ids), question),
-                f"vector:{self.vector_backend}+lexical_empty", query, diagnostics,
-            )
-        fused = self._reciprocal_rank_fusion(lexical_rows, vector_rows, max(top_k, self.lexical_candidate_k))
-        fused, diagnostics = self._semantic_rerank(question, fused, top_k, diagnostics, enabled=_apply_rerank)
+        )
+        rows, diagnostics = self._semantic_rerank(
+            question,
+            selection.rows,
+            top_k,
+            diagnostics,
+            enabled=_apply_rerank,
+        )
         return RetrievalResult(
-            self._select_diverse(fused, top_k, len(document_ids), question),
-            f"hybrid_rrf:{lexical_strategy}+{self.vector_backend}",
+            self._select_diverse(rows, top_k, len(document_ids), question),
+            selection.label,
             query,
             diagnostics,
         )
@@ -363,40 +373,7 @@ class EvidenceRetriever:
         enabled: bool = True,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Apply semantic reranking and record its diagnostics."""
-        details = dict(diagnostics or {})
-        details["rerank_model"] = self.reranker.model if self.reranker else None
-        if not enabled or self.reranker is None or len(rows) < 2:
-            details["rerank_status"] = "disabled" if self.reranker is None else "skipped"
-            return rows, details
-        candidates = [dict(row) for row in rows[: self.rerank_candidate_k]]
-        try:
-            scores = self.reranker.rerank(
-                question,
-                [str(row.get("content") or "") for row in candidates],
-                top_n=min(max(top_k, self.rerank_top_n), len(candidates)),
-            )
-        except Exception as exc:  # semantic rerank must never take down evidence retrieval
-            logger.warning("Semantic rerank failed; keeping deterministic retrieval order", exc_info=True)
-            details.update({"rerank_status": "fallback", "rerank_error": type(exc).__name__})
-            return rows, details
-        ranked: list[dict[str, Any]] = []
-        used: set[int] = set()
-        for score in sorted(scores, key=lambda item: (-item.relevance_score, item.index)):
-            row = candidates[score.index]
-            row["rerank_score"] = round(score.relevance_score, 8)
-            row["pre_rerank_score"] = row.get("retrieval_score")
-            ranked.append(row)
-            used.add(score.index)
-        ranked.extend(row for index, row in enumerate(candidates) if index not in used)
-        ranked.extend(dict(row) for row in rows[len(candidates) :])
-        details.update(
-            {
-                "rerank_status": "completed",
-                "rerank_candidates": len(candidates),
-                "rerank_results": len(scores),
-            }
-        )
-        return ranked, details
+        return self.rerank_policy.apply(question, rows, top_k, diagnostics, enabled=enabled)
 
     @staticmethod
     def _task_compatibility(plan: QueryPlan, role: str, content: str) -> float:
@@ -570,15 +547,8 @@ class EvidenceRetriever:
 
     @staticmethod
     def _rerank(rows: list[dict[str, Any]], terms: list[str], top_k: int) -> list[dict[str, Any]]:
-        """Apply the configured cross-encoder reranker when available."""
-        for row in rows:
-            content = str(row.get("content", "")).casefold()
-            title = str(row.get("document_title", "")).casefold()
-            overlap = sum(2 for term in terms if term in content) + sum(1 for term in terms if term in title)
-            bm25_score = -float(row.get("lexical_rank") or 0)
-            row["retrieval_score"] = round(bm25_score + overlap, 6)
-            row["lexical_score"] = row["retrieval_score"]
-        return sorted(rows, key=lambda item: (-float(item["retrieval_score"]), int(item.get("slide_no") or 0)))[:top_k]
+        """Rank lexical candidates through the independent lexical policy."""
+        return LexicalRanker().rank(rows, terms, top_k)
 
     def _reciprocal_rank_fusion(
         self,
@@ -587,25 +557,4 @@ class EvidenceRetriever:
         top_k: int,
     ) -> list[dict[str, Any]]:
         """Fuse ranked candidate lists using reciprocal rank fusion."""
-        fused: dict[str, dict[str, Any]] = {}
-        scores: dict[str, float] = {}
-        sources: dict[str, list[str]] = {}
-        for source, weight, rows in (
-            ("lexical", self.lexical_weight, lexical_rows),
-            ("vector", self.vector_weight, vector_rows),
-        ):
-            for rank, row in enumerate(rows, 1):
-                chunk_id = str(row["id"])
-                if chunk_id not in fused or source == "lexical":
-                    fused[chunk_id] = dict(row)
-                elif row.get("vector_score") is not None:
-                    fused[chunk_id]["vector_score"] = row["vector_score"]
-                scores[chunk_id] = scores.get(chunk_id, 0.0) + weight / (self.rrf_k + rank)
-                sources.setdefault(chunk_id, []).append(source)
-        for chunk_id, row in fused.items():
-            row["retrieval_score"] = round(scores[chunk_id], 8)
-            row["retrieval_sources"] = sources[chunk_id]
-        return sorted(
-            fused.values(),
-            key=lambda item: (-float(item["retrieval_score"]), int(item.get("slide_no") or 0), str(item["id"])),
-        )[:top_k]
+        return self.fusion.fuse(lexical_rows, vector_rows, top_k)

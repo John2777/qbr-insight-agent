@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from packages.qbr_core.application.contracts import Citation
+from packages.qbr_core.application.run_store import RunEventStore
 from packages.qbr_core.application.runtime import metadata_with_answer_metrics
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.foundation.errors import ResourceNotFound
@@ -14,9 +16,10 @@ from packages.qbr_core.foundation.serialization import _loads
 class PublicResultReader:
     """Build public API representations from persisted QBR records."""
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, events: RunEventStore | None = None) -> None:
         """Initialize the reader with its database dependency."""
         self._db = db
+        self._events = events or RunEventStore(db)
 
     def get_conversation(self, conversation_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
         """Return a user-scoped conversation with messages and citations."""
@@ -107,9 +110,7 @@ class PublicResultReader:
     def run_events(self, run_id: str, workspace_id: str, after: int = 0) -> list[dict[str, Any]]:
         """Return ordered run events after the supplied event identifier."""
         self.get_run(run_id, workspace_id)
-        with self._db.read() as conn:
-            rows = conn.execute("SELECT * FROM run_events WHERE run_id=? AND id>? ORDER BY id", (run_id, after)).fetchall()
-        return [{"id": row["id"], "event": row["event_type"], "data": _loads(row["data_json"], {})} for row in rows]
+        return self._events.list_after(run_id, after)
 
     def citation(self, item: dict[str, Any], conn: sqlite3.Connection) -> dict[str, Any]:
         """Enrich a persisted citation with slide and preview metadata."""
@@ -128,4 +129,4 @@ class PublicResultReader:
         if slide:
             item.update(dict(slide))
         item["preview_url"] = f"/api/v1/slides/{item['slide_id']}/preview"
-        return item
+        return Citation.from_mapping(item).to_dict()

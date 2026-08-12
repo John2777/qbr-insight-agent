@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import importlib
 import re
 from pathlib import Path
 
@@ -35,7 +34,7 @@ def test_qbr_core_root_remains_organized_into_feature_packages() -> None:
     root_modules = {path.name for path in CORE_ROOT.glob("*.py")}
     feature_packages = {path.name for path in CORE_ROOT.iterdir() if path.is_dir() and (path / "__init__.py").is_file()}
 
-    assert root_modules == {"__init__.py", "compatibility.py"}
+    assert root_modules == {"__init__.py"}
     assert {
         "analysis",
         "application",
@@ -69,19 +68,11 @@ def test_qbr_core_classes_and_methods_have_english_docstrings() -> None:
     assert not violations, "Class and method docstring violations:\n" + "\n".join(violations)
 
 
-def test_legacy_module_paths_resolve_to_canonical_modules() -> None:
-    aliases = {
-        "auth": "security.authentication",
-        "db": "foundation.database",
-        "query_planning": "planning",
-        "qa_service": "application.qa_service",
-        "service": "application.service",
-    }
+def test_legacy_module_alias_bootstrap_has_been_removed() -> None:
+    package_source = (CORE_ROOT / "__init__.py").read_text(encoding="utf-8")
 
-    for legacy_name, canonical_name in aliases.items():
-        legacy = importlib.import_module(f"packages.qbr_core.{legacy_name}")
-        canonical = importlib.import_module(f"packages.qbr_core.{canonical_name}")
-        assert legacy is canonical
+    assert not (CORE_ROOT / "compatibility.py").exists()
+    assert "install_legacy_module_aliases" not in package_source
 
 
 def test_composition_root_wires_explicit_application_boundaries(tmp_path: Path) -> None:
@@ -104,9 +95,11 @@ def test_qbr_service_uses_components_instead_of_mixin_inheritance(tmp_path: Path
     assert isinstance(service.ingestion, IngestionService)
     assert isinstance(service.persistence, ParsedPersistenceService)
     assert isinstance(service.resources, ResourceService)
-    assert service.ingestion._root is service
-    assert service.persistence._root is service
-    assert service.resources._root is service
+    assert service.ingestion.db is service.db
+    assert service.ingestion.persistence is service.persistence
+    assert service.persistence.db is service.db
+    assert service.resources.db is service.db
+    assert service.resources.persistence is service.persistence
 
 
 def test_query_planning_package_exposes_a_small_public_facade() -> None:

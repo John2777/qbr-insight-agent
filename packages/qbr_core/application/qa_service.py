@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-import json
-import logging
 import sqlite3
 import threading
 from typing import Any
 
 from packages.qbr_core.analysis.answering import DeterministicAnswerEngine
+from packages.qbr_core.application.answer_runs import AnswerRunExecutor
 from packages.qbr_core.application.results import PublicResultReader
-from packages.qbr_core.application.runtime import (
-    answer_deltas as _answer_deltas,
-)
-from packages.qbr_core.application.runtime import (
-    answer_metrics,
-    document_vocabulary,
-)
-from packages.qbr_core.application.warnings import describe_warning
+from packages.qbr_core.application.run_store import RunEventStore, RunRepository
+from packages.qbr_core.application.runtime import answer_deltas as _runtime_answer_deltas
 from packages.qbr_core.conversations.context import ConversationContextAssembler
 from packages.qbr_core.conversations.summary import ConversationSummaryService
 from packages.qbr_core.foundation.config import Settings
 from packages.qbr_core.foundation.database import Database, utc_now
-from packages.qbr_core.foundation.errors import Conflict, InvalidState, ResourceNotFound
+from packages.qbr_core.foundation.errors import Conflict, ResourceNotFound
 from packages.qbr_core.foundation.identifiers import new_id
 from packages.qbr_core.foundation.leases import LeaseCoordinator
-from packages.qbr_core.foundation.serialization import _loads
 from packages.qbr_core.planning import QueryPlannerAgent
 from packages.qbr_core.providers.llm import EvidenceQAAgent
 from packages.qbr_core.retrieval.engine import EvidenceRetriever
 from packages.qbr_core.skills.registry import SkillDescriptor, SkillRegistry
 
-logger = logging.getLogger(__name__)
+
+def _answer_deltas(answer: str, chunk_size: int = 48) -> tuple[str, ...]:
+    """Return compatibility chunks using the shared runtime implementation."""
+    return _runtime_answer_deltas(answer, chunk_size)
 
 
 class QAApplicationService:
@@ -59,25 +54,42 @@ class QAApplicationService:
         self.table_reasoning_skill = table_reasoning_skill
         self.leases = leases
         self.query_planner = query_planner or QueryPlannerAgent()
+        conversation_settings = settings.conversation
+        model_settings = settings.models
         self.context_assembler = ConversationContextAssembler(
-            max_turns=settings.conversation_context_max_turns,
-            token_budget=settings.conversation_context_token_budget,
-            summary_token_budget=settings.conversation_summary_token_budget,
+            max_turns=conversation_settings.context_max_turns,
+            token_budget=conversation_settings.context_token_budget,
+            summary_token_budget=conversation_settings.summary_token_budget,
         )
         self.summary_service = ConversationSummaryService(
             db,
-            max_recent_turns=settings.conversation_context_max_turns,
-            model=summary_model if settings.conversation_summary_enabled else None,
-            provider=settings.llm_provider if summary_model is not None else None,
-            model_name=(settings.planner_model or settings.llm_model) if summary_model is not None else None,
+            max_recent_turns=conversation_settings.context_max_turns,
+            model=summary_model if conversation_settings.summary_enabled else None,
+            provider=model_settings.provider if summary_model is not None else None,
+            model_name=(model_settings.planner_model or model_settings.model) if summary_model is not None else None,
         )
         self._run_lock = threading.Lock()
-        self.result_reader = PublicResultReader(db)
         self.answer_engine = DeterministicAnswerEngine(
             db=db,
             retriever=retriever,
             skill_registry=skill_registry,
             table_reasoning_skill=table_reasoning_skill,
+        )
+        self.run_events_store = RunEventStore(db)
+        self.run_repository = RunRepository(db, self.run_events_store, self.context_assembler)
+        self.result_reader = PublicResultReader(db, self.run_events_store)
+        self.run_executor = AnswerRunExecutor(
+            models=model_settings,
+            conversation=conversation_settings,
+            workers=settings.workers,
+            db=db,
+            repository=self.run_repository,
+            events=self.run_events_store,
+            query_planner=self.query_planner,
+            answer_engine=self.answer_engine,
+            qa_agent=qa_agent,
+            deep_qa_agent=self.deep_qa_agent,
+            summary_service=self.summary_service,
         )
 
     def _lease_expiry(self) -> str:
@@ -241,32 +253,17 @@ class QAApplicationService:
                 (assistant_message_id, conversation_id, "assistant", "", "running", run_id, "{}", assistant_sequence, now),
             )
             conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
-            conn.execute(
-                """INSERT INTO runs(
-                     id,workspace_id,conversation_id,user_message_id,assistant_message_id,context_cutoff_sequence,
-                     status,warning_json,model_json,created_at,completed_at,client_message_id
-                   ) VALUES (?,?,?,?,?,?,?,'[]','{}',?,NULL,?)""",
-                (
-                    run_id,
-                    workspace_id,
-                    conversation_id,
-                    user_message_id,
-                    assistant_message_id,
-                    user_sequence,
-                    "pending",
-                    now,
-                    client_message_id,
-                ),
-            )
-            self.context_assembler.load_or_create(
+            self.run_repository.create(
                 conn,
                 run_id=run_id,
+                workspace_id=workspace_id,
                 conversation_id=conversation_id,
-                current_user_message_id=user_message_id,
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_message_id,
                 cutoff_sequence=user_sequence,
                 created_at=now,
+                client_message_id=client_message_id,
             )
-            self._run_event(conn, run_id, "queued", {"run_id": run_id})
         return {
             "user_message_id": user_message_id,
             "assistant_message_id": assistant_message_id,
@@ -280,287 +277,22 @@ class QAApplicationService:
         if not self._run_lock.acquire(blocking=False):
             return None
         try:
-            now = utc_now()
-            with self.db.transaction(immediate=True) as conn:
-                run = conn.execute(
-                    """SELECT * FROM runs
-                       WHERE attempts < ? AND (status='pending' OR (status='running' AND lease_expires_at < ?))
-                       ORDER BY created_at,rowid LIMIT 1""",
-                    (self.settings.job_max_attempts, now),
-                ).fetchone()
-                if not run:
-                    return None
-                updated = conn.execute(
-                    """UPDATE runs SET status='running',started_at=coalesce(started_at,?),attempts=attempts+1,
-                         lease_owner=?,lease_expires_at=?,error_detail=NULL
-                       WHERE id=? AND (status='pending' OR lease_expires_at < ?)""",
-                    (now, worker_id, self._lease_expiry(), run["id"], now),
-                ).rowcount
-                if not updated:
-                    return None
-                self._run_event(conn, run["id"], "run_started", {"run_id": run["id"]})
-            with self._lease_heartbeat("runs", str(run["id"]), worker_id):
-                self.process_run(str(run["id"]))
-            return str(run["id"])
+            run_id = self.run_repository.claim_next(
+                worker_id=worker_id,
+                max_attempts=self.settings.workers.max_attempts,
+                lease_expires_at=self._lease_expiry(),
+            )
+            if not run_id:
+                return None
+            with self._lease_heartbeat("runs", run_id, worker_id):
+                self.process_run(run_id)
+            return run_id
         finally:
             self._run_lock.release()
 
     def process_run(self, run_id: str) -> None:
         """Execute one answer-generation run through completion."""
-        with self.db.transaction(immediate=True) as conn:
-            run = conn.execute(
-                """SELECT r.*,c.scope_json,c.user_id,m.sequence_no assistant_sequence
-                   FROM runs r JOIN conversations c ON c.id=r.conversation_id
-                   JOIN messages m ON m.id=r.assistant_message_id WHERE r.id=?""",
-                (run_id,),
-            ).fetchone()
-            if not run:
-                raise ResourceNotFound("Run not found")
-            current_user_message_id = run["user_message_id"]
-            if not current_user_message_id:
-                legacy_user = conn.execute(
-                    """SELECT id,sequence_no FROM messages
-                       WHERE conversation_id=? AND role='user' AND sequence_no<?
-                       ORDER BY sequence_no DESC LIMIT 1""",
-                    (run["conversation_id"], run["assistant_sequence"]),
-                ).fetchone()
-                if not legacy_user:
-                    raise InvalidState("Run has no user question")
-                current_user_message_id = str(legacy_user["id"])
-                cutoff_sequence = int(legacy_user["sequence_no"])
-                conn.execute(
-                    "UPDATE runs SET user_message_id=?,context_cutoff_sequence=? WHERE id=?",
-                    (current_user_message_id, cutoff_sequence, run_id),
-                )
-            else:
-                cutoff_sequence = int(run["context_cutoff_sequence"] or 0)
-            question_row = conn.execute(
-                """SELECT content,sequence_no FROM messages
-                   WHERE id=? AND conversation_id=? AND role='user'""",
-                (current_user_message_id, run["conversation_id"]),
-            ).fetchone()
-            if not question_row:
-                raise InvalidState("Run has no user question")
-            if cutoff_sequence < 1:
-                cutoff_sequence = int(question_row["sequence_no"])
-                conn.execute("UPDATE runs SET context_cutoff_sequence=? WHERE id=?", (cutoff_sequence, run_id))
-            context = self.context_assembler.load_or_create(
-                conn,
-                run_id=run_id,
-                conversation_id=str(run["conversation_id"]),
-                current_user_message_id=str(current_user_message_id),
-                cutoff_sequence=cutoff_sequence,
-                created_at=str(run["created_at"]),
-            )
-        if not question_row:
-            raise InvalidState("Run has no user question")
-        question = str(question_row["content"])
-        scope = _loads(run["scope_json"], {})
-        document_ids = list(scope.get("document_ids", []))
-        history = context.history_list()
-        try:
-            with self.db.transaction(immediate=True) as conn:
-                self._run_event(
-                    conn,
-                    run_id,
-                    "status",
-                    {"node": "query_planning", "message": "Understanding the question and building a retrieval plan"},
-                )
-            plan = self.query_planner.plan(
-                question,
-                history=history,
-                conversation_summary=context.summary,
-                document_ids=document_ids,
-                document_vocabulary=document_vocabulary(self.db, str(run["workspace_id"]), document_ids),
-                run_id=run_id,
-            )
-            with self.db.transaction(immediate=True) as conn:
-                self._run_event(
-                    conn,
-                    run_id,
-                    "query_plan",
-                    {
-                        "task_summary": plan.task_summary,
-                        "answer_brief": plan.answer_brief,
-                        "operations": list(plan.operations),
-                        "evidence_requirements": list(plan.evidence_requirements),
-                        "planner_confidence": plan.planner_confidence,
-                        "profile": plan.execution_profile,
-                        "planner": plan.planner,
-                        "queries": [item.to_dict() for item in plan.retrieval_queries],
-                    },
-                )
-                self._run_event(
-                    conn,
-                    run_id,
-                    "status",
-                    {"node": "retrieval", "message": "Searching multiple sources and selecting business evidence"},
-                )
-            answer_result = self.answer_engine.answer_result(
-                question,
-                run["workspace_id"],
-                document_ids,
-                plan=plan,
-            )
-            answer = answer_result.answer
-            evidence = answer_result.evidence
-            warnings = answer_result.warnings
-            model_info: dict[str, Any] = {
-                "provider": self.settings.llm_provider if self.settings.llm_enabled else None,
-                "model": self.settings.llm_model if self.settings.llm_enabled else None,
-                "status": "disabled" if not self.settings.llm_enabled else "pending",
-                "thinking": "disabled",
-                "planner": plan.planner,
-                "answer_source": "safe_fallback" if not self.settings.llm_enabled else "pending",
-            }
-            verification_info: dict[str, Any] = {"disposition": "not_run"}
-            selected_agent = self.deep_qa_agent if plan.execution_profile == "deep" else self.qa_agent
-            if selected_agent:
-                with self.db.transaction(immediate=True) as conn:
-                    self._run_event(conn, run_id, "status", {"node": "answer_generation", "message": "Generating an evidence-based answer"})
-                generated = selected_agent.answer(
-                    question=question,
-                    grounding_context=answer_result.grounding_context or answer,
-                    safe_fallback=answer,
-                    evidence=evidence,
-                    history=history,
-                    conversation_summary=context.summary,
-                    task_frame=plan.to_dict(),
-                    run_id=run_id,
-                )
-                answer = generated.answer
-                warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
-                model_info = {**generated.model, "planner": plan.planner}
-                verification_info = generated.diagnostics
-            message_metadata = {
-                "show_visuals": plan.needs_visuals,
-                "knowledge_source": "document_evidence",
-                "pipeline_version": "semantic-task-frame-v3-polished",
-                "query_plan": plan.to_dict(),
-                "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
-                "retrieval": answer_result.diagnostics.get("retrieval", {}),
-                "evidence_pack": answer_result.diagnostics.get("evidence_pack", {}),
-                "verified_calculation": answer_result.diagnostics.get("verified_calculation"),
-                "verified_calculation_facts": answer_result.diagnostics.get("verified_calculation_facts", []),
-                "verified_calculation_kind": answer_result.diagnostics.get("verified_calculation_kind"),
-                "verified_calculation_scope": answer_result.diagnostics.get("verified_calculation_scope"),
-                "chart_scope": answer_result.diagnostics.get("chart_scope"),
-                "verification": verification_info,
-                "conversation_context": {
-                    **context.diagnostics,
-                    "original_question": question,
-                    "canonical_question": plan.canonical_question,
-                },
-            }
-            self._complete_run(run, answer, evidence, warnings, model_info, message_metadata)
-            if self.settings.conversation_summary_enabled:
-                self.summary_service.refresh_safely(str(run["conversation_id"]), run_id=run_id)
-        except Exception as exc:
-            with self.db.transaction(immediate=True) as conn:
-                current = conn.execute("SELECT attempts FROM runs WHERE id=?", (run_id,)).fetchone()
-                retrying = bool(current and int(current["attempts"]) < self.settings.job_max_attempts)
-                conn.execute(
-                    """UPDATE runs SET status=?,error_detail=?,lease_owner=NULL,lease_expires_at=NULL,
-                         completed_at=? WHERE id=?""",
-                    ("pending" if retrying else "failed", str(exc)[:1000], None if retrying else utc_now(), run_id),
-                )
-                if not retrying:
-                    conn.execute(
-                        "UPDATE messages SET status='failed',content=? WHERE id=?",
-                        ("Answer generation failed. Try again later.", run["assistant_message_id"]),
-                    )
-                self._run_event(
-                    conn,
-                    run_id,
-                    "warning" if retrying else "error",
-                    {"code": "RUN_RETRY" if retrying else "RUN_FAILED", "detail": type(exc).__name__},
-                )
-            raise
-
-    def _complete_run(
-        self,
-        run: sqlite3.Row,
-        answer: str,
-        evidence: list[dict[str, Any]],
-        warnings: list[str],
-        model_info: dict[str, Any],
-        message_metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """Persist the final answer, citations, events, warnings, and model metadata."""
-        run_id = str(run["id"])
-        completed_at = utc_now()
-        metadata = dict(message_metadata or {})
-        query_plan = metadata.get("query_plan") if isinstance(metadata.get("query_plan"), dict) else {}
-        planner_diagnostics = (
-            query_plan.get("diagnostics") if isinstance(query_plan.get("diagnostics"), dict) else {}
-        )
-        metadata["answer_metrics"] = answer_metrics(
-            created_at=str(run["created_at"]),
-            completed_at=completed_at,
-            planner_diagnostics=planner_diagnostics,
-            answer_model=model_info,
-        )
-        if warnings:
-            severity_rank = {"info": 0, "warning": 1, "degraded": 2, "error": 3}
-            max_severity = max((describe_warning(code).severity for code in warnings), key=severity_rank.__getitem__)
-            log = logger.info if max_severity == "info" else logger.warning
-            log(
-                json.dumps(
-                    {
-                        "event": "answer_run_completed_with_signals",
-                        "run_id": run_id,
-                        "warning_codes": list(dict.fromkeys(warnings)),
-                        "max_severity": max_severity,
-                        "model_status": model_info.get("status"),
-                        "answer_source": model_info.get("answer_source"),
-                        "verification_disposition": metadata.get("verification", {}).get("disposition"),
-                        "planner": model_info.get("planner"),
-                    },
-                    separators=(",", ":"),
-                )
-            )
-        with self.db.transaction(immediate=True) as conn:
-            conn.execute(
-                "UPDATE messages SET content=?,status='completed',metadata_json=? WHERE id=?",
-                (answer, self.db.json(metadata), run["assistant_message_id"]),
-            )
-            for index, evidence_item in enumerate(evidence, 1):
-                citation_id = new_id("cit")
-                conn.execute(
-                    "INSERT INTO citations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        citation_id,
-                        run["assistant_message_id"],
-                        index,
-                        evidence_item["document_version_id"],
-                        evidence_item["slide_id"],
-                        evidence_item.get("element_id"),
-                        evidence_item.get("chunk_id"),
-                        evidence_item["quote"],
-                        self.db.json(evidence_item.get("bbox", {})),
-                        evidence_item["confidence"],
-                        evidence_item["source_kind"],
-                    ),
-                )
-                self._run_event(conn, run_id, "citation", {"id": citation_id, "label": f"[{index}]"})
-            for piece in _answer_deltas(answer):
-                self._run_event(conn, run_id, "answer_delta", {"delta": piece})
-            for warning in warnings:
-                self._run_event(conn, run_id, "warning", {"message": warning})
-            self._run_event(conn, run_id, "model", model_info)
-            conn.execute(
-                """UPDATE runs SET status='completed',warning_json=?,model_json=?,completed_at=?,
-                     lease_owner=NULL,lease_expires_at=NULL WHERE id=?""",
-                (self.db.json(warnings), self.db.json(model_info), completed_at, run_id),
-            )
-            self._run_event(conn, run_id, "completed", {"message_id": run["assistant_message_id"]})
-
-    def _run_event(self, conn: sqlite3.Connection, run_id: str, event_type: str, data: dict[str, Any]) -> None:
-        """Persist one ordered event for an answer run."""
-        conn.execute(
-            "INSERT INTO run_events(run_id,event_type,data_json,created_at) VALUES (?,?,?,?)",
-            (run_id, event_type, self.db.json(data), utc_now()),
-        )
+        self.run_executor.execute(run_id)
 
     def _answer(
         self,

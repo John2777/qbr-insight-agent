@@ -6,20 +6,28 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from packages.qbr_core.application.component import ServiceComponent
 from packages.qbr_core.documents.parser import ParsedElement, ParsedPresentation, ParsedSlide
 from packages.qbr_core.documents.vision import VisualKnowledge
-from packages.qbr_core.foundation.database import utc_now
+from packages.qbr_core.foundation.database import Database, utc_now
 from packages.qbr_core.foundation.identifiers import new_id
 from packages.qbr_core.foundation.serialization import _number
+from packages.qbr_core.retrieval.engine import EvidenceRetriever
 from packages.qbr_core.retrieval.evidence import classify_content_role
+from packages.qbr_core.skills.registry import SkillDescriptor
 
 logger = logging.getLogger(__name__)
 
 
-class ParsedPersistenceService(ServiceComponent):
+class ParsedPersistenceService:
     """Persist parser and vision outputs as normalized document evidence."""
-    def _persist_parsed(
+
+    def __init__(self, *, db: Database, parser_skill: SkillDescriptor, retriever: EvidenceRetriever) -> None:
+        """Initialize persistence with explicit storage and indexing dependencies."""
+        self.db = db
+        self.parser_skill = parser_skill
+        self.retriever = retriever
+
+    def persist_parsed(
         self,
         job_id: str,
         job: sqlite3.Row,
@@ -89,6 +97,21 @@ class ParsedPersistenceService(ServiceComponent):
             # Vector indexes are derived caches. Ingestion remains successful and
             # FTS retrieval stays available if embedding/index refresh fails.
             logger.warning("Vector indexing failed after document ingestion", exc_info=True)
+
+    def _job_event(self, conn: sqlite3.Connection, job_id: str, event_type: str, data: dict[str, Any]) -> None:
+        """Persist an ingestion event within the caller's transaction."""
+        conn.execute(
+            "INSERT INTO job_events(job_id,event_type,data_json,created_at) VALUES (?,?,?,?)",
+            (job_id, event_type, self.db.json(data), utc_now()),
+        )
+
+    def _advance_job(self, conn: sqlite3.Connection, job_id: str, stage: str, progress: float) -> None:
+        """Advance ingestion progress while keeping persistence atomic."""
+        conn.execute(
+            "UPDATE ingestion_jobs SET current_stage=?,progress=?,updated_at=? WHERE id=?",
+            (stage, progress, utc_now(), job_id),
+        )
+        self._job_event(conn, job_id, "progress", {"stage": stage, "progress": progress})
 
     def _persist_slide(
         self,
@@ -351,10 +374,30 @@ class ParsedPersistenceService(ServiceComponent):
         )
         return chunk_id
 
+    def insert_chart(
+        self,
+        conn: sqlite3.Connection,
+        job: sqlite3.Row | dict[str, Any],
+        slide_id: str,
+        element_id: str,
+        chart: dict[str, Any],
+        *,
+        create_review_task: bool,
+    ) -> str:
+        """Persist a chart through the explicit persistence boundary."""
+        return self._insert_chart(
+            conn,
+            job,
+            slide_id,
+            element_id,
+            chart,
+            create_review_task=create_review_task,
+        )
+
     def _insert_chart(
         self,
         conn: sqlite3.Connection,
-        job: sqlite3.Row,
+        job: sqlite3.Row | dict[str, Any],
         slide_id: str,
         element_id: str,
         chart: dict[str, Any],

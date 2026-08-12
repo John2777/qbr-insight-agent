@@ -3,25 +3,80 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from packages.qbr_core.application.component import ServiceComponent
 from packages.qbr_core.documents.parser import parse_presentation, render_slides
-from packages.qbr_core.documents.vision import VisualKnowledge
-from packages.qbr_core.foundation.database import utc_now
+from packages.qbr_core.documents.vision import SlideVisionEnricher, VisualKnowledge
+from packages.qbr_core.foundation.config import Settings
+from packages.qbr_core.foundation.database import Database, utc_now
 from packages.qbr_core.foundation.errors import Conflict, InvalidState, ResourceNotFound
 from packages.qbr_core.foundation.identifiers import new_id
+from packages.qbr_core.foundation.leases import LeaseCoordinator
 from packages.qbr_core.foundation.serialization import _sha256_file
 from packages.qbr_core.security.archive import OOXML_MIME, inspect_pptx
+from packages.qbr_core.skills.registry import SkillDescriptor, SkillRegistry
 
 logger = logging.getLogger(__name__)
 
 
-class IngestionService(ServiceComponent):
+class ParsedPersistence(Protocol):
+    """Persist parsed presentations for the ingestion workflow."""
+
+    def persist_parsed(
+        self,
+        job_id: str,
+        job: sqlite3.Row,
+        parser_run_id: str,
+        parsed: Any,
+        renders: list[Path],
+        render_warnings: list[str],
+        visual_knowledge: dict[int, VisualKnowledge],
+        visual_warnings: list[dict[str, Any]],
+    ) -> None:
+        """Persist one parsed presentation and finish its job."""
+
+
+class PurgeCoordinator(Protocol):
+    """Expose the purge operations required during ingestion."""
+
+    def is_requested(self, document_id: str) -> bool:
+        """Return whether a permanent purge was requested."""
+
+    def discard_version_objects(self, workspace_id: str, version_id: str) -> None:
+        """Discard objects for a version being purged."""
+
+
+class IngestionService:
     """Coordinate secure upload, parsing, enrichment, and ingestion job leases."""
+
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        db: Database,
+        process_lock: threading.Lock,
+        leases: LeaseCoordinator,
+        document_purges: PurgeCoordinator,
+        parser_skill: SkillDescriptor,
+        skill_registry: SkillRegistry,
+        vision_enricher: SlideVisionEnricher | None,
+        persistence: ParsedPersistence,
+    ) -> None:
+        """Initialize ingestion with explicit collaborators."""
+        self.settings = settings
+        self.db = db
+        self._process_lock = process_lock
+        self.leases = leases
+        self.document_purges = document_purges
+        self.parser_skill = parser_skill
+        self.skill_registry = skill_registry
+        self.vision_enricher = vision_enricher
+        self.persistence = persistence
+
     def import_document(
         self,
         temp_path: Path,
@@ -249,7 +304,7 @@ class IngestionService(ServiceComponent):
         if self._cancel_and_finish(job_id, row, parser_run_id) or self._purge_requested(row):
             return
         visual_knowledge, visual_warnings = self._enrich_visuals(job_id, parsed.slides, renders)
-        self._persist_parsed(
+        self.persistence.persist_parsed(
             job_id,
             row,
             parser_run_id,

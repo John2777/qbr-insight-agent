@@ -32,7 +32,7 @@ def test_visual_ingestion_to_retrieval_answer_is_auditable(tmp_path: Path, synth
         vision_enrich_all_slides=True,
     )
     app = create_app(settings)
-    app.state.service.vision_enricher = FakeSlideVisionEnricher()
+    app.state.service.ingestion.vision_enricher = FakeSlideVisionEnricher()
 
     with TestClient(app) as client:
         with synthetic_pptx.open("rb") as source:

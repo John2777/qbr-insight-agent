@@ -284,7 +284,11 @@ class DeterministicAnswerEngine:
     def _compact_chart_quote(quote: str) -> str:
         """Turn a raw chart-series dump into a small, replayable fact summary."""
 
-        line = next((item.strip() for item in quote.splitlines() if item.strip()), quote.strip())
+        lines = [item.strip() for item in quote.splitlines() if item.strip()]
+        line = max(
+            lines or [quote.strip()],
+            key=lambda item: (len(re.findall(r"[^;=|]+\s*=\s*[-+]?\d", item)), len(item)),
+        )
         points = re.findall(r"([^;=|]+)=\s*([-+]?\d+(?:\.\d+)?%?)", line)
         if len(points) < 4:
             return line

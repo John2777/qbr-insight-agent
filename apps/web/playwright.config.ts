@@ -30,6 +30,9 @@ export default defineConfig({
       env: {
         ...inheritedEnv,
         QBR_DATA_DIR: e2eDataDir,
+        DATABASE_PATH: join(e2eDataDir, "app.sqlite3"),
+        OBJECT_STORE_PATH: join(e2eDataDir, "objects"),
+        VECTOR_INDEX_DIR: join(e2eDataDir, "vector-indexes"),
         RUN_INLINE_WORKER: "true",
         WORKER_POLL_SECONDS: "0.05",
         RETRIEVAL_STRATEGY: "hybrid",

@@ -7,6 +7,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from packages.qbr_core.foundation.paths import bundled_skill_root
+from packages.qbr_core.foundation.settings_domains import (
+    AuthSettings,
+    ConversationSettings,
+    ModelSettings,
+    RetrievalSettings,
+    SkillSettings,
+    StorageSettings,
+    VisionSettings,
+    WebSettings,
+    WorkerSettings,
+)
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -260,6 +271,123 @@ class Settings:
     def vision_configured(self) -> bool:
         """Return whether slide-vision configuration is complete."""
         return self.vision_enabled and bool(self.vision_api_key and self.vision_model and self.vision_base_url)
+
+    @property
+    def storage(self) -> StorageSettings:
+        """Return storage and ingestion settings as a focused domain object."""
+        return StorageSettings(
+            self.data_dir,
+            self.database_path,
+            self.object_dir,
+            self.max_upload_mib,
+            self.max_slides,
+        )
+
+    @property
+    def conversation(self) -> ConversationSettings:
+        """Return conversation context settings as a focused domain object."""
+        return ConversationSettings(
+            self.conversation_context_max_turns,
+            self.conversation_context_token_budget,
+            self.conversation_summary_enabled,
+            self.conversation_summary_token_budget,
+        )
+
+    @property
+    def models(self) -> ModelSettings:
+        """Return language-model settings as a focused domain object."""
+        return ModelSettings(
+            enabled=self.llm_enabled,
+            provider=self.llm_provider,
+            base_url=self.llm_base_url,
+            api_key=self.llm_api_key,
+            model=self.llm_model,
+            planner_model=self.planner_model,
+            deep_model=self.deep_llm_model,
+            answer_polishing_enabled=self.answer_polishing_enabled,
+            timeout_seconds=self.llm_timeout_seconds,
+            max_retries=self.llm_max_retries,
+            max_tokens=self.llm_max_tokens,
+            temperature=self.llm_temperature,
+        )
+
+    @property
+    def retrieval(self) -> RetrievalSettings:
+        """Return retrieval settings as a focused domain object."""
+        return RetrievalSettings(
+            strategy=self.retrieval_strategy,
+            embedding_provider=self.embedding_provider,
+            embedding_base_url=self.embedding_base_url,
+            embedding_api_key=self.embedding_api_key,
+            embedding_model=self.embedding_model,
+            embedding_dimensions=self.embedding_dimensions,
+            embedding_batch_size=self.embedding_batch_size,
+            vector_index_dir=self.vector_index_dir,
+            vector_min_similarity=self.vector_min_similarity,
+            vector_candidate_k=self.vector_candidate_k,
+            lexical_candidate_k=self.lexical_candidate_k,
+            rrf_k=self.retrieval_rrf_k,
+            lexical_weight=self.retrieval_lexical_weight,
+            vector_weight=self.retrieval_vector_weight,
+            rerank_enabled=self.rerank_enabled,
+            rerank_base_url=self.rerank_base_url,
+            rerank_api_key=self.rerank_api_key,
+            rerank_model=self.rerank_model,
+            rerank_candidate_k=self.rerank_candidate_k,
+            rerank_top_n=self.rerank_top_n,
+        )
+
+    @property
+    def vision(self) -> VisionSettings:
+        """Return visual enrichment settings as a focused domain object."""
+        return VisionSettings(
+            enabled=self.vision_enabled,
+            base_url=self.vision_base_url,
+            api_key=self.vision_api_key,
+            model=self.vision_model,
+            max_tokens=self.vision_max_tokens,
+            max_slides=self.vision_max_slides,
+            enrich_all_slides=self.vision_enrich_all_slides,
+        )
+
+    @property
+    def auth(self) -> AuthSettings:
+        """Return authentication settings as a focused domain object."""
+        return AuthSettings(
+            app_env=self.app_env,
+            mode=self.auth_mode,
+            jwt_secret=self.jwt_secret,
+            jwt_issuer=self.jwt_issuer,
+            jwt_audience=self.jwt_audience,
+            password_username=self.password_username,
+            password_hash=self.password_hash,
+            password_user_id=self.password_user_id,
+            password_workspace_id=self.password_workspace_id,
+            session_ttl_seconds=self.session_ttl_seconds,
+            login_max_attempts=self.login_max_attempts,
+            login_window_seconds=self.login_window_seconds,
+        )
+
+    @property
+    def workers(self) -> WorkerSettings:
+        """Return worker and lease settings as a focused domain object."""
+        return WorkerSettings(
+            self.run_inline_worker,
+            self.worker_poll_seconds,
+            self.job_lease_seconds,
+            self.job_heartbeat_seconds,
+            self.job_max_attempts,
+        )
+
+    @property
+    def skills(self) -> SkillSettings:
+        """Return skill-discovery settings as a focused domain object."""
+        return SkillSettings(self.skill_paths, self.parser_skill_name, self.table_reasoning_skill_name)
+
+    @property
+    def web(self) -> WebSettings:
+        """Return HTTP and logging settings as a focused domain object."""
+        return WebSettings(self.cors_origins, self.log_level)
 
     def ensure_directories(self) -> None:
         """Create the configured runtime data directories."""

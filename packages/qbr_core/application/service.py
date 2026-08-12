@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from typing import Any
 
 from packages.qbr_core.application.ingestion import IngestionService
@@ -33,59 +34,63 @@ logger = logging.getLogger(__name__)
 
 class QBRService:
     """Compose and expose the framework-independent QBR application facade."""
-    _COMPONENT_NAMES = ("ingestion", "persistence", "resources")
 
     def __init__(self, settings: Settings) -> None:
         """Initialize the QBR composition root and its application dependencies."""
         self.settings = settings
         settings.ensure_directories()
-        self.skill_registry = SkillRegistry(settings.skill_paths or default_skill_paths())
+        storage = settings.storage
+        skills = settings.skills
+        workers = settings.workers
+        models = settings.models
+        retrieval = settings.retrieval
+        self.skill_registry = SkillRegistry(skills.paths or default_skill_paths())
         self.parser_skill = self.skill_registry.resolve(
             kind=PARSER_SKILL_KIND,
-            name=settings.parser_skill_name or None,
+            name=skills.parser_name or None,
             capability=NATIVE_CHART_CAPABILITY,
             accepts=OOXML_MIME,
         )
         self.table_reasoning_skill = self.skill_registry.resolve(
             kind=REASONING_SKILL_KIND,
-            name=settings.table_reasoning_skill_name or None,
+            name=skills.table_reasoning_name or None,
             capability=STRUCTURED_TABLE_REASONING_CAPABILITY,
             accepts="application/x-qbr-structured-table",
         )
-        self.db = Database(settings.database_path)
+        self.db = Database(storage.database_path)
         self.db.initialize()
         self._process_lock = threading.Lock()
         self.leases = LeaseCoordinator(
             self.db,
-            LeasePolicy(settings.job_lease_seconds, settings.job_heartbeat_seconds),
+            LeasePolicy(workers.lease_seconds, workers.heartbeat_seconds),
         )
         vector_store = create_vector_store(self.db, settings)
         reranker = create_reranker(settings)
         self.retriever = EvidenceRetriever(
             self.db,
-            mode=settings.retrieval_strategy,
+            mode=retrieval.strategy,
             vector_store=vector_store,
-            lexical_candidate_k=settings.lexical_candidate_k,
-            vector_candidate_k=settings.vector_candidate_k,
-            rrf_k=settings.retrieval_rrf_k,
-            lexical_weight=settings.retrieval_lexical_weight,
-            vector_weight=settings.retrieval_vector_weight,
+            lexical_candidate_k=retrieval.lexical_candidate_k,
+            vector_candidate_k=retrieval.vector_candidate_k,
+            rrf_k=retrieval.rrf_k,
+            lexical_weight=retrieval.lexical_weight,
+            vector_weight=retrieval.vector_weight,
             reranker=reranker,
-            rerank_candidate_k=settings.rerank_candidate_k,
-            rerank_top_n=settings.rerank_top_n,
+            rerank_candidate_k=retrieval.rerank_candidate_k,
+            rerank_top_n=retrieval.rerank_top_n,
         )
         self.document_purges = DocumentPurgeService(settings, self.db, self.retriever.rebuild_workspace)
-        self.qa_agent = EvidenceQAAgent(settings) if settings.llm_configured else None
+        self.qa_agent = EvidenceQAAgent(settings) if models.configured else None
         self.deep_qa_agent = (
-            EvidenceQAAgent(settings, model_name=settings.deep_llm_model)
-            if settings.llm_configured and settings.deep_llm_model and settings.deep_llm_model != settings.llm_model
+            EvidenceQAAgent(settings, model_name=models.deep_model)
+            if models.configured and models.deep_model and models.deep_model != models.model
             else self.qa_agent
         )
         planner_model = None
         if self.qa_agent is not None:
             planner_model = build_chat_model(
                 settings,
-                settings.planner_model or settings.llm_model,
+                models.planner_model or models.model,
                 # The planner must emit a compact JSON object. Hidden reasoning can
                 # consume the entire completion budget before any JSON is emitted
                 # on OpenAI-compatible reasoning models (notably Qwen), so keep it
@@ -94,8 +99,8 @@ class QBRService:
             )
         self.query_planner = QueryPlannerAgent(
             planner_model,
-            provider=settings.llm_provider if planner_model is not None else None,
-            model_name=(settings.planner_model or settings.llm_model) if planner_model is not None else None,
+            provider=models.provider if planner_model is not None else None,
+            model_name=(models.planner_model or models.model) if planner_model is not None else None,
         )
         self.vision_enricher = create_vision_enricher(settings)
         self.qa_service = QAApplicationService(
@@ -110,26 +115,28 @@ class QBRService:
             query_planner=self.query_planner,
             summary_model=planner_model,
         )
-        self.ingestion = IngestionService(self)
-        self.persistence = ParsedPersistenceService(self)
-        self.resources = ResourceService(self)
-
-    def __getattr__(self, name: str) -> Any:
-        """Delegate unresolved attributes to the composed root service."""
-        for component_name in self._COMPONENT_NAMES:
-            component = self.__dict__.get(component_name)
-            if component is not None and hasattr(type(component), name):
-                return getattr(component, name)
-        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
-
-    def __dir__(self) -> list[str]:
-        """Include delegated component attributes in interactive discovery."""
-        names = set(super().__dir__())
-        for component_name in self._COMPONENT_NAMES:
-            component = self.__dict__.get(component_name)
-            if component is not None:
-                names.update(name for name in dir(type(component)) if not name.startswith("__"))
-        return sorted(names)
+        self.persistence = ParsedPersistenceService(
+            db=self.db,
+            parser_skill=self.parser_skill,
+            retriever=self.retriever,
+        )
+        self.ingestion = IngestionService(
+            settings=self.settings,
+            db=self.db,
+            process_lock=self._process_lock,
+            leases=self.leases,
+            document_purges=self.document_purges,
+            parser_skill=self.parser_skill,
+            skill_registry=self.skill_registry,
+            vision_enricher=self.vision_enricher,
+            persistence=self.persistence,
+        )
+        self.resources = ResourceService(
+            db=self.db,
+            document_purges=self.document_purges,
+            retriever=self.retriever,
+            persistence=self.persistence,
+        )
 
     def health(self) -> dict[str, Any]:
         """Return the current service and dependency health summary."""
@@ -171,6 +178,107 @@ class QBRService:
                 "model": self.settings.vision_model if self.settings.vision_configured else None,
             },
         }
+
+    def import_document(
+        self,
+        temp_path: Path,
+        *,
+        filename: str,
+        title: str | None,
+        metadata: dict[str, Any] | None,
+        deduplication: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Queue a presentation through the explicit ingestion boundary."""
+        return self.ingestion.import_document(
+            temp_path,
+            filename=filename,
+            title=title,
+            metadata=metadata,
+            deduplication=deduplication,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+
+    def process_next_job(self, worker_id: str = "worker-local") -> str | None:
+        """Claim and execute the next ingestion job."""
+        return self.ingestion.process_next_job(worker_id)
+
+    def process_job(self, job_id: str, *, worker_id: str = "worker-local") -> None:
+        """Execute a specific ingestion job."""
+        self.ingestion.process_job(job_id, worker_id=worker_id)
+
+    def list_documents(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return active documents visible to a workspace."""
+        return self.resources.list_documents(workspace_id)
+
+    def get_document(self, document_id: str, workspace_id: str) -> dict[str, Any]:
+        """Return one workspace-scoped document."""
+        return self.resources.get_document(document_id, workspace_id)
+
+    def list_slides(self, version_id: str, workspace_id: str) -> list[dict[str, Any]]:
+        """Return slides for a workspace-scoped document version."""
+        return self.resources.list_slides(version_id, workspace_id)
+
+    def get_slide(self, slide_id: str, workspace_id: str) -> dict[str, Any]:
+        """Return one workspace-scoped slide."""
+        return self.resources.get_slide(slide_id, workspace_id)
+
+    def preview_path(self, slide_id: str, workspace_id: str) -> Path:
+        """Return the authorized slide preview path."""
+        return self.resources.preview_path(slide_id, workspace_id)
+
+    def thumbnail_path(self, slide_id: str, workspace_id: str) -> Path:
+        """Return the authorized slide thumbnail path."""
+        return self.resources.thumbnail_path(slide_id, workspace_id)
+
+    def get_job(self, job_id: str, workspace_id: str) -> dict[str, Any]:
+        """Return one workspace-scoped ingestion job."""
+        return self.resources.get_job(job_id, workspace_id)
+
+    def job_events(self, job_id: str, workspace_id: str, after: int = 0) -> list[dict[str, Any]]:
+        """Return ordered ingestion events after a cursor."""
+        return self.resources.job_events(job_id, workspace_id, after)
+
+    def cancel_job(self, job_id: str, workspace_id: str) -> dict[str, Any]:
+        """Cancel a workspace-scoped ingestion job."""
+        return self.resources.cancel_job(job_id, workspace_id)
+
+    def retry_job(self, job_id: str, workspace_id: str) -> dict[str, Any]:
+        """Retry a workspace-scoped ingestion job."""
+        return self.resources.retry_job(job_id, workspace_id)
+
+    def delete_document(self, document_id: str, workspace_id: str, user_id: str) -> None:
+        """Soft-delete a workspace document."""
+        self.resources.delete_document(document_id, workspace_id, user_id)
+
+    def purge_document(self, document_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        """Permanently purge a workspace document."""
+        return self.resources.purge_document(document_id, workspace_id, user_id)
+
+    def list_reviews(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return review tasks for a workspace."""
+        return self.resources.list_reviews(workspace_id)
+
+    def claim_review(self, review_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:
+        """Claim a review task for a workspace user."""
+        return self.resources.claim_review(review_id, workspace_id, user_id)
+
+    def resolve_review(
+        self,
+        review_id: str,
+        workspace_id: str,
+        user_id: str,
+        corrected: dict[str, Any] | None,
+        resolution: str = "resolved",
+    ) -> dict[str, Any]:
+        """Resolve or dismiss a chart review task."""
+        return self.resources.resolve_review(review_id, workspace_id, user_id, corrected, resolution)
+
+    def analytics_summary(self, workspace_id: str) -> dict[str, Any]:
+        """Return aggregate workspace analytics."""
+        return self.resources.analytics_summary(workspace_id)
 
     # Keep the original facade stable for API, worker, and scripts while the
     # conversation/answer use cases live behind their own application boundary.
@@ -219,6 +327,10 @@ class QBRService:
     def process_run(self, run_id: str) -> None:
         """Execute one answer-generation run through completion."""
         self.qa_service.process_run(run_id)
+
+    def _series_axis_metadata(self, chart: dict[str, Any], series: dict[str, Any]) -> dict[str, Any]:
+        """Resolve chart axis metadata through the explicitly injected persistence service."""
+        return self.persistence._series_axis_metadata(chart, series)
 
     def get_run(self, run_id: str, workspace_id: str) -> dict[str, Any]:
         """Return a workspace-scoped answer run and its public artifacts."""
