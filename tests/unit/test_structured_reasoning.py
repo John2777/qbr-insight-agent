@@ -7,7 +7,9 @@ from dataclasses import replace
 from packages.qbr_core.analysis.answering import DeterministicAnswerEngine
 from packages.qbr_core.analysis.calculations import ChartCalculator, VerifiedCalculation
 from packages.qbr_core.analysis.charts.analyzer import ChartAnalyzer
+from packages.qbr_core.analysis.reconciliation import ScopeReconciler
 from packages.qbr_core.analysis.table_reasoning import TableReasoner
+from packages.qbr_core.analysis.verification import ClaimEvidenceVerifier
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.planning import deterministic_plan
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, query_terms
@@ -258,6 +260,134 @@ def test_chart_calculator_derives_adjacent_steps_for_any_ordered_category_path()
     assert result.scope["operation"] == "sequential_path"
     assert "Use A→Use B (-8)" in result.text
     assert result.facts[0]["largest_decline"] == {"from": "Use A", "to": "Use B", "delta": -8.0}
+
+
+def test_scope_reconciler_proves_chart_aggregation_from_member_set_difference() -> None:
+    source = table_source(
+        "Market | VONB US$m\n"
+        "Hong Kong | 2,256\n"
+        "Mainland China | 1,660\n"
+        "Thailand | 587\n"
+        "Singapore | 444\n"
+        "Malaysia | 285\n"
+        "Other Markets | 865\n"
+        "Group Total | 6,097"
+    )
+    source.update(
+        {
+            "document_id": "growth",
+            "document_version_id": "growth_v1",
+            "slide_id": "regional_table",
+            "slide_no": 2,
+            "element_id": "regional_table_element",
+            "document_title": "Group Growth",
+        }
+    )
+    chart_values = (
+        ("Hong Kong", 2_256.0),
+        ("Mainland China", 1_660.0),
+        ("Thailand", 587.0),
+        ("Singapore", 444.0),
+        ("Other Markets", 1_150.0),
+    )
+    rows = [
+        _generic_chart_point(
+            series_id="vonb",
+            series_name="VONB",
+            category=market,
+            value=value,
+            order=index,
+            slide_id="regional_mix",
+        )
+        for index, (market, value) in enumerate(chart_values)
+    ]
+
+    result = ScopeReconciler().analyze(
+        "区域经营表中的 Other Markets VONB 是865，而区域组合图是1,150。这两个数字是否矛盾？请完成勾稽。",
+        [source],
+        rows,
+    )
+
+    assert result is not None
+    assert result.kind == "scope_reconciliation"
+    assert "不矛盾" in result.text
+    assert "“Malaysia”（285）" in result.text
+    assert "865 + 285 = 1,150" in result.text
+    assert result.scope["included_labels"] == ["Malaysia"]
+    assert result.scope["narrow_source"] == "table"
+    assert result.scope["broad_source"] == "chart"
+    assert result.facts[0]["basis"] == "derived_from_member_set_difference"
+    assert [item["content_role"] for item in result.evidence] == ["table", "chart"]
+    verification = ClaimEvidenceVerifier().verify(
+        result.text,
+        fallback=result.text,
+        evidence=list(result.evidence),
+    )
+    assert verification.accepted
+
+
+def test_scope_reconciler_handles_the_inverse_source_direction_without_domain_labels() -> None:
+    source = table_source(
+        "Segment | Revenue million\n"
+        "North | 100\n"
+        "South | 50\n"
+        "Residual | 50\n"
+        "Total | 200"
+    )
+    chart_values = (("North", 100.0), ("South", 50.0), ("Adjacent", 20.0), ("Residual", 30.0))
+    rows = [
+        _generic_chart_point(
+            series_id="revenue",
+            series_name="Revenue",
+            category=segment,
+            value=value,
+            order=index,
+            slide_id="segment_detail",
+        )
+        for index, (segment, value) in enumerate(chart_values)
+    ]
+
+    result = ScopeReconciler().analyze(
+        "Why does Residual revenue differ between the table and chart? Reconcile the discrepancy.",
+        [source],
+        rows,
+    )
+
+    assert result is not None
+    assert "not contradictory" in result.text
+    assert '"Adjacent" (20)' in result.text
+    assert "30 + 20 = 50" in result.text
+    assert result.scope["narrow_source"] == "chart"
+    assert result.scope["broad_source"] == "table"
+
+
+def test_scope_reconciler_does_not_claim_a_scope_change_when_the_arithmetic_fails() -> None:
+    source = table_source(
+        "Segment | Revenue million\n"
+        "North | 100\n"
+        "South | 50\n"
+        "Residual | 51"
+    )
+    chart_values = (("North", 100.0), ("South", 50.0), ("Adjacent", 20.0), ("Residual", 30.0))
+    rows = [
+        _generic_chart_point(
+            series_id="revenue",
+            series_name="Revenue",
+            category=segment,
+            value=value,
+            order=index,
+            slide_id="unreconciled_detail",
+        )
+        for index, (segment, value) in enumerate(chart_values)
+    ]
+
+    result = ScopeReconciler().analyze(
+        "Why does Residual revenue differ between the table and chart? Reconcile the discrepancy.",
+        [source],
+        rows,
+    )
+
+    assert result is None
 
 
 def test_chart_analyzer_accepts_single_series_multi_category_structures() -> None:

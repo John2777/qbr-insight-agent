@@ -7,6 +7,7 @@ from typing import Any
 
 from packages.qbr_core.analysis.calculations import ChartCalculator, VerifiedCalculation
 from packages.qbr_core.analysis.charts.analyzer import ChartAnalyzer
+from packages.qbr_core.analysis.reconciliation import ScopeReconciler
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.planning import QueryPlan, RetrievalQuery, deterministic_plan
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, RetrievalResult
@@ -50,6 +51,7 @@ class DeterministicAnswerEngine:
         self.skill_registry = skill_registry
         self.table_reasoning_skill = table_reasoning_skill
         self.evidence_builder = EvidencePackBuilder()
+        self.scope_reconciler = ScopeReconciler()
         self.chart_calculator = ChartCalculator()
         self.chart_analyzer = ChartAnalyzer()
 
@@ -82,8 +84,15 @@ class DeterministicAnswerEngine:
         ):
             retrieval, pack = self._retry_missing_evidence(task, workspace_id, document_ids, retrieval, pack)
 
-        calculation = self._table_calculation(question, retrieval.items) if not task.needs_visuals else None
-        chart_rows = self._load_chart_rows(workspace_id, document_ids) if calculation is None else []
+        calculation = None
+        chart_rows: list[dict[str, Any]] = []
+        if self.scope_reconciler.is_requested(question):
+            chart_rows = self._load_chart_rows(workspace_id, document_ids)
+            calculation = self.scope_reconciler.analyze(question, retrieval.items, chart_rows)
+        if calculation is None and not task.needs_visuals:
+            calculation = self._table_calculation(question, retrieval.items)
+        if calculation is None and not chart_rows:
+            chart_rows = self._load_chart_rows(workspace_id, document_ids)
         if calculation is None:
             calculation = self.chart_calculator.analyze(question, chart_rows)
         if calculation is None:
