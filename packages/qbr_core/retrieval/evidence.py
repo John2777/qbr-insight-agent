@@ -203,7 +203,7 @@ def _loads(value: str | None, default: Any) -> Any:
 
 
 def _terms(plan: QueryPlan) -> set[str]:
-    corpus = " ".join([plan.original_question, plan.canonical_question, *(item.text for item in plan.retrieval_queries)])
+    corpus = " ".join([plan.original_question, *(item.text for item in plan.retrieval_queries)])
     values = re.findall(r"[a-z0-9%_-]{2,}|[\u4e00-\u9fff]{2,}", corpus.casefold())
     return {value for value in values if value not in STOPWORDS}
 
@@ -314,17 +314,7 @@ def _is_heading_like(content: str) -> bool:
 
 
 def _task_requests_context_role(plan: QueryPlan, role: str) -> bool:
-    corpus = " ".join(
-        [
-            plan.original_question,
-            plan.canonical_question,
-            plan.task_summary,
-            plan.answer_brief,
-            *plan.operations,
-            *plan.evidence_requirements,
-            *(item.text for item in plan.retrieval_queries),
-        ]
-    ).casefold()
+    corpus = plan.original_question.casefold()
     if role == "provenance":
         markers = ("来源", "出处", "公开披露", "数据源", "source", "provenance", "official disclosure", "public baseline")
     else:

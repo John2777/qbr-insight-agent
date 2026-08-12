@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from packages.qbr_core.analysis.answering import DeterministicAnswerEngine
@@ -11,7 +12,7 @@ from packages.qbr_core.application.runtime import document_vocabulary
 from packages.qbr_core.conversations.summary import ConversationSummaryService
 from packages.qbr_core.foundation.database import Database
 from packages.qbr_core.foundation.settings_domains import ConversationSettings, ModelSettings, WorkerSettings
-from packages.qbr_core.planning import QueryPlannerAgent
+from packages.qbr_core.planning import QueryPlannerAgent, RetrievalQuery
 from packages.qbr_core.providers.llm import EvidenceQAAgent
 
 
@@ -119,13 +120,85 @@ class AnswerRunExecutor:
                     evidence=evidence,
                     history=history,
                     conversation_summary=context.summary,
-                    task_frame=plan.to_dict(),
                     run_id=run_id,
                 )
                 answer = generated.answer
                 warnings = list(dict.fromkeys([*warnings, *generated.warnings]))
                 model_info = {**generated.model, "planner": plan.planner}
-                verification_info = generated.diagnostics
+                adequacy = selected_agent.assess_adequacy(
+                    question=question,
+                    answer=answer,
+                    evidence=evidence,
+                    run_id=run_id,
+                )
+                verification_info = {**generated.diagnostics, "adequacy": adequacy.diagnostics}
+                if adequacy.gap_query:
+                    self._emit_status(run_id, "retrieval", "Filling an answer coverage gap against the original question")
+                    gap_query = RetrievalQuery(
+                        f"q{len(plan.retrieval_queries) + 1}",
+                        adequacy.gap_query,
+                        "answer_gap",
+                        1.15,
+                    )
+                    retry_plan = replace(plan, retrieval_queries=(*plan.retrieval_queries, gap_query))
+                    retry_result = self._answer_engine.answer_result(
+                        question,
+                        str(run["workspace_id"]),
+                        document_ids,
+                        plan=retry_plan,
+                    )
+                    previous_evidence = {
+                        (
+                            str(item.get("slide_id") or ""),
+                            str(item.get("element_id") or item.get("chunk_id") or ""),
+                            str(item.get("quote") or ""),
+                        )
+                        for item in evidence
+                    }
+                    retry_evidence = {
+                        (
+                            str(item.get("slide_id") or ""),
+                            str(item.get("element_id") or item.get("chunk_id") or ""),
+                            str(item.get("quote") or ""),
+                        )
+                        for item in retry_result.evidence
+                    }
+                    if retry_evidence != previous_evidence:
+                        regenerated = selected_agent.answer(
+                            question=question,
+                            grounding_context=retry_result.grounding_context or retry_result.answer,
+                            safe_fallback=retry_result.answer,
+                            evidence=retry_result.evidence,
+                            history=history,
+                            conversation_summary=context.summary,
+                            run_id=run_id,
+                        )
+                        final_adequacy = selected_agent.assess_adequacy(
+                            question=question,
+                            answer=regenerated.answer,
+                            evidence=retry_result.evidence,
+                            run_id=run_id,
+                        )
+                        answer_result = retry_result
+                        answer = regenerated.answer
+                        evidence = retry_result.evidence
+                        warnings = list(dict.fromkeys([*retry_result.warnings, *regenerated.warnings]))
+                        model_info = {**regenerated.model, "planner": retry_plan.planner}
+                        verification_info = {
+                            **regenerated.diagnostics,
+                            "adequacy": {
+                                **final_adequacy.diagnostics,
+                                "retried": True,
+                                "initial_gap_query": adequacy.gap_query,
+                            },
+                        }
+                        plan = retry_plan
+                    else:
+                        verification_info["adequacy"] = {
+                            **adequacy.diagnostics,
+                            "retried": True,
+                            "new_evidence": False,
+                        }
             metadata = self._message_metadata(
                 question=question,
                 plan=plan,

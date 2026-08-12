@@ -273,3 +273,23 @@ def test_verifier_accepts_explicit_validation_boundary_with_causal_vocabulary() 
 
     assert result.accepted
     assert result.warnings == ()
+
+
+def test_verifier_rejects_absolute_negative_inferred_from_missing_retrieval() -> None:
+    evidence = _evidence("股东资本比率为221%，较上期下降，但仍高于绿色阈值。")
+    answer = "当前文档不存在任何潜在风险，所有指标均安全。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert not result.accepted
+    assert "LLM_ABSOLUTE_NEGATIVE_VALIDATION_FAILED" in result.warnings
+    assert result.diagnostics["unsupported_absolute_negatives"]
+
+
+def test_verifier_allows_evidence_boundary_without_claiming_nonexistence() -> None:
+    evidence = _evidence("股东资本比率为221%。")
+    answer = "当前证据不足，无法确认是否存在其他潜在问题。[1]"
+
+    result = ClaimEvidenceVerifier().verify(answer, fallback=str(evidence[0]["quote"]), evidence=evidence)
+
+    assert result.accepted

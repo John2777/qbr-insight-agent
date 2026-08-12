@@ -468,6 +468,47 @@ def _unsupported_chart_inferences(answer: str, scope: dict[str, Any] | None) -> 
     return violations
 
 
+_ABSOLUTE_NEGATIVE = re.compile(
+    r"(?:不存在|没有任何|均不存在|全部(?:正常|安全|合规)|无任何|无法识别出任何|"
+    r"\bno\s+(?:specific|material|potential|company|entity|risk|issue)s?\b|"
+    r"\bnone\b|\ball\s+(?:are|is|remain)\s+(?:safe|normal|compliant)\b)",
+    flags=re.I,
+)
+_EVIDENCE_BOUNDARY = re.compile(
+    r"(?:没有|未能?|无法).{0,12}(?:检索|找到|确认|判断)|证据不足|资料不足|"
+    r"(?:not|no).{0,12}(?:retrieved|found)|insufficient\s+evidence|cannot\s+(?:confirm|determine)",
+    flags=re.I,
+)
+
+
+def _claim_terms(text: str) -> set[str]:
+    folded = text.casefold()
+    terms = set(re.findall(r"[a-z0-9_.%-]{2,}", folded))
+    for phrase in re.findall(r"[\u4e00-\u9fff]{2,}", folded):
+        terms.update(phrase[index : index + 2] for index in range(len(phrase) - 1))
+    return terms
+
+
+def _unsupported_absolute_negatives(answer: str, evidence_corpus: str) -> list[str]:
+    """Reject universal negatives inferred only from retrieval absence."""
+
+    evidence_segments = [
+        segment.strip()
+        for segment in _segments(evidence_corpus)
+        if _ABSOLUTE_NEGATIVE.search(segment) and not _EVIDENCE_BOUNDARY.search(segment)
+    ]
+    unsupported: list[str] = []
+    for segment in _segments(answer):
+        claim = segment.strip()
+        if not claim or not _ABSOLUTE_NEGATIVE.search(claim) or _EVIDENCE_BOUNDARY.search(claim):
+            continue
+        claim_terms = _claim_terms(claim)
+        supported = any(len(claim_terms & _claim_terms(source)) >= 2 for source in evidence_segments)
+        if not supported:
+            unsupported.append(claim)
+    return unsupported
+
+
 def _remove_claim_segments(answer: str, claims: list[str]) -> tuple[str, int]:
     """Remove exact claim segments while preserving the rest of each line."""
 
@@ -575,6 +616,7 @@ class ClaimEvidenceVerifier:
         unsupported = _unsupported_facts(answer, allowed_facts, allowed_corpus)
         chart_scope = _chart_scope_diagnostics(answer, evidence)
         unsupported_inferences = _unsupported_chart_inferences(answer, chart_scope)
+        unsupported_negatives = _unsupported_absolute_negatives(answer, allowed_corpus)
 
         warnings: list[str] = []
         if citation_failed:
@@ -587,21 +629,27 @@ class ClaimEvidenceVerifier:
             warnings.append("LLM_CHART_COVERAGE_VALIDATION_FAILED")
         if unsupported_inferences:
             warnings.append("LLM_CHART_INFERENCE_VALIDATION_FAILED")
+        if unsupported_negatives:
+            warnings.append("LLM_ABSOLUTE_NEGATIVE_VALIDATION_FAILED")
 
         diagnostics: dict[str, Any] = {
             "references": sorted(references),
             "valid_references": sorted(valid_references),
             "unsupported_numeric_facts": [fact.diagnostic() for fact in unsupported],
             "evidence_roles": sorted({str(item.get("content_role") or "unknown") for item in evidence}),
-            "task_summary": str((task_frame or {}).get("task_summary") or ""),
+            "original_question": str((task_frame or {}).get("original_question") or ""),
             "chart_scope": chart_scope,
             "unsupported_chart_inferences": unsupported_inferences,
+            "unsupported_absolute_negatives": unsupported_negatives,
             "disposition": "accepted",
         }
         if not warnings:
             return VerificationResult(True, (), diagnostics)
 
-        inference_repaired, inference_removed = _remove_claim_segments(answer, unsupported_inferences)
+        inference_repaired, inference_removed = _remove_claim_segments(
+            answer,
+            [*unsupported_inferences, *unsupported_negatives],
+        )
         repaired, numeric_removed = _repair_candidate(
             inference_repaired,
             allowed=allowed_facts,

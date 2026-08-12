@@ -168,14 +168,15 @@ def test_llm_token_limit_without_finish_reason_uses_fallback(tmp_path: Path) -> 
     assert result.warnings == ["LLM_OUTPUT_TRUNCATED"]
 
 
-def test_generation_prompt_uses_task_frame_without_fixed_summary_template(tmp_path: Path) -> None:
+def test_generation_prompt_uses_raw_question_without_planner_task_frame(tmp_path: Path) -> None:
     model = FakeModel("增长延续，同时集中度偏高。[1]")
     items = [{**evidence()[0], "quote": "Growth continued while concentration remained elevated."}]
     agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
     result = answer(agent, "请概括优势和潜在问题。", "Growth continued; concentration elevated [1]", items)
     prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[0])
     assert result.answer == "增长延续，同时集中度偏高。[1]"
-    assert "语义任务框架" in prompt
+    assert "原始“用户问题”是唯一任务合同" in prompt
+    assert "语义任务框架" not in prompt
     assert "固定使用“总体判断" not in prompt
     assert "negative_signal_summary" not in prompt
 
@@ -231,8 +232,26 @@ def test_polishing_agent_restructures_by_question_without_changing_facts(tmp_pat
     assert result.model["polishing"]["status"] == "completed"
     polish_prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[1])
     assert "用户问题" in polish_prompt
-    assert "语义任务框架" in polish_prompt
+    assert "语义任务框架" not in polish_prompt
     assert "待润色草稿" in polish_prompt
+
+
+def test_answer_adequacy_checker_returns_one_broad_retrieval_gap(tmp_path: Path) -> None:
+    model = FakeModel(
+        '{"complete":false,"gap_query":"公司整体 风险 压力 趋势 关注点","reason":"只回答了具体实体读法"}'
+    )
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
+
+    assessment = agent.assess_adequacy(
+        question="当前文档里能找到哪些公司潜在的问题",
+        answer="没有找到被标记为风险的具体公司。[1]",
+        evidence=[{**evidence()[0], "quote": "资本比率下降，但仍高于阈值。"}],
+    )
+
+    assert not assessment.complete
+    assert assessment.gap_query == "公司整体 风险 压力 趋势 关注点"
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[0])
+    assert "原始用户问题是唯一任务合同" in prompt
 
 
 def test_polishing_prompt_is_general_and_rejects_unscoped_overall_rankings() -> None:

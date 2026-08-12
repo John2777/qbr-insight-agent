@@ -353,8 +353,7 @@ class EvidenceRetriever:
             f"multi_query:{strategy or self.mode}",
             " | ".join(item.text for item in plan.retrieval_queries),
             {
-                "task_summary": plan.task_summary,
-                "operations": list(plan.operations),
+                "original_question": plan.original_question,
                 "query_count": len(plan.retrieval_queries),
                 "unique_candidates": len(fused),
                 "eligible_candidates": len(ranked),
@@ -389,15 +388,7 @@ class EvidenceRetriever:
             "methodology": -0.8,
             "boilerplate": -1.5,
         }.get(role, 0.0)
-        task_text = " ".join(
-            (
-                plan.canonical_question,
-                plan.task_summary,
-                *plan.operations,
-                *plan.evidence_requirements,
-                *(query.text for query in plan.retrieval_queries),
-            )
-        ).casefold()
+        task_text = " ".join((plan.original_question, *(query.text for query in plan.retrieval_queries))).casefold()
         terms = {
             token
             for token in re.findall(r"[a-z0-9%_-]{2,}|[\u4e00-\u9fff]{2,}", task_text)

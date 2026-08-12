@@ -81,16 +81,51 @@ def _linguistic_expansions(question: str) -> list[RetrievalQuery]:
     focused = _focused_terms(question)
     if focused and focused.casefold() != folded:
         expansions.append(RetrievalQuery("", focused, "language_focus", 1.1))
-    domain_terms = [text for aliases, text in DOMAIN_EQUIVALENTS if any(alias in folded for alias in aliases)]
-    if domain_terms:
-        expansions.append(RetrievalQuery("", " ".join(domain_terms), "vocabulary_bridge", 1.0))
-    language_bridges = [text for aliases, text in LANGUAGE_BRIDGES if any(alias in folded for alias in aliases)]
-    if language_bridges:
-        expansions.append(RetrievalQuery("", " ".join(language_bridges), "paraphrase_bridge", 1.05))
+    bridge_groups: list[list[RetrievalQuery]] = []
+    for aliases, text in DOMAIN_EQUIVALENTS:
+        if any(alias in folded for alias in aliases):
+            bridge_groups.append(_bridge_token_queries(question, text, "vocabulary_bridge", 1.0))
+    for aliases, text in LANGUAGE_BRIDGES:
+        if any(alias in folded for alias in aliases):
+            bridge_groups.append(_bridge_token_queries(question, text, "paraphrase_bridge", 1.05))
+    for index in range(max((len(group) for group in bridge_groups), default=0)):
+        expansions.extend(group[index] for group in bridge_groups if index < len(group))
     definition = find_term(question)
     if definition is not None:
         expansions.append(RetrievalQuery("", " ".join(definition.search_aliases), "document_terminology", 1.1))
     return expansions
+
+
+def _bridge_token_queries(
+    question: str,
+    bridge: str,
+    kind: str,
+    weight: float,
+    *,
+    limit: int = 10,
+) -> list[RetrievalQuery]:
+    """Turn a vocabulary bridge into independent recall lanes.
+
+    Lexical search may require every token in one query to occur in the same
+    chunk.  Keeping synonyms as separate lanes avoids accidentally making a
+    broad bridge more restrictive than the user's literal wording.
+    """
+
+    tokens = list(dict.fromkeys(re.findall(r"[a-z0-9%_.-]{2,}|[\u4e00-\u9fff]{2,}", bridge.casefold())))
+    preferred_cjk = _answer_language(question) == "zh"
+    primary = [token for token in tokens if bool(re.search(r"[\u4e00-\u9fff]", token)) == preferred_cjk]
+    secondary = [token for token in tokens if token not in primary]
+
+    def sample(values: list[str], count: int) -> list[str]:
+        if len(values) <= count:
+            return values
+        if count <= 1:
+            return values[:count]
+        indexes = [round(index * (len(values) - 1) / (count - 1)) for index in range(count)]
+        return [values[index] for index in dict.fromkeys(indexes)]
+
+    selected = [*sample(primary, 7), *sample(secondary, 3)][:limit]
+    return [RetrievalQuery("", token, kind, weight) for token in selected]
 
 
 def _dedupe_queries(items: Iterable[RetrievalQuery], *, limit: int = 8) -> tuple[RetrievalQuery, ...]:
@@ -122,7 +157,8 @@ def linguistic_plan(question: str, document_ids: Iterable[str] = ()) -> QueryPla
         else "Complete the user's task directly using verifiable evidence and a structure dictated by the question."
     )
     queries = _dedupe_queries(
-        (RetrievalQuery("", question, "literal", 1.35), *_linguistic_expansions(question))
+        (RetrievalQuery("", question, "literal", 1.35), *_linguistic_expansions(question)),
+        limit=14,
     )
     return QueryPlan(
         original_question=question,

@@ -42,7 +42,7 @@ LANGUAGE_BRIDGES: tuple[tuple[tuple[str, ...], str], ...] = (
         "performance results revenue margin growth profitability cash capital operations 业绩 营收 利润率 增长 盈利 现金 资本 运营",
     ),
     (
-        ("bad news", "potential issue", "weak spot", "warning sign", "潜在问题", "隐患", "短板", "警惕", "主要风险"),
+        ("bad news", "potential issue", "weak spot", "warning sign", "潜在问题", "潜在的问题", "隐患", "短板", "警惕", "主要风险"),
         "risk concern decline pressure below target threshold concentration 风险 担忧 下滑 承压 未达标 阈值 集中度",
     ),
     (

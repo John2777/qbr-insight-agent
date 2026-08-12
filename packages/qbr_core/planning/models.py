@@ -24,11 +24,10 @@ class RetrievalQuery:
 
 @dataclass(frozen=True, slots=True)
 class QueryPlan:
-    """A semantic task frame, not an intent-classification result.
+    """A retrieval plan whose original question remains the answer contract.
 
-    The planner describes what the user is trying to accomplish and which
-    evidence would support it.  Downstream components consume those semantic
-    fields directly instead of branching on a closed set of intent labels.
+    The descriptive fields remain for compatibility and auditability, but are
+    derived from the raw question rather than authored by the retrieval model.
     """
 
     original_question: str

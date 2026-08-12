@@ -77,7 +77,7 @@ class DeterministicAnswerEngine:
         """Produce an answer together with evidence and diagnostics."""
         task = plan or deterministic_plan(question, document_ids)
         retrieval = self.retriever.search_plan(task, workspace_id, document_ids, top_k=16)
-        if len(document_ids) > 1:
+        if document_ids:
             retrieval = self._supplement_document_lanes(task, workspace_id, document_ids, retrieval)
         pack = self.evidence_builder.build(task, retrieval.items, max_atoms=8)
         missing_documents = pack.diagnostics.get("missing_document_ids", [])
@@ -100,8 +100,6 @@ class DeterministicAnswerEngine:
                 dict.fromkeys(
                     (
                         question,
-                        task.canonical_question,
-                        task.task_summary,
                         *(alias for term in mentioned_terms(question) for alias in term.search_aliases),
                     )
                 )
@@ -176,7 +174,7 @@ class DeterministicAnswerEngine:
         document_ids: list[str],
         retrieval: RetrievalResult,
     ) -> RetrievalResult:
-        """Give every scoped document an independent retrieval lane before global evidence competition."""
+        """Give every scoped document a lane plus structured anchors before evidence competition."""
 
         merged = {str(row["id"]): row for row in retrieval.items}
         lane_diagnostics: list[dict[str, Any]] = []
@@ -361,9 +359,7 @@ class DeterministicAnswerEngine:
             )
             return calculation.fallback_text + limitation
 
-        task_text = " ".join(
-            [plan.original_question, plan.canonical_question, plan.task_summary, plan.answer_brief, *plan.operations]
-        ).casefold()
+        task_text = plan.original_question.casefold()
         provenance_requested = any(
             marker in task_text
             for marker in ("来源", "出处", "公开披露", "数据源", "source", "provenance", "methodology", "口径")

@@ -11,6 +11,7 @@ from packages.qbr_core import QBRService, Settings
 from packages.qbr_core.foundation.database import utc_now
 from packages.qbr_core.planning import QueryPlannerAgent, deterministic_plan
 from packages.qbr_core.planning.agent import PLANNER_SYSTEM_PROMPT
+from packages.qbr_core.providers.llm import AnswerAdequacy, LLMAnswer
 from packages.qbr_core.retrieval.engine import EvidenceRetriever, query_terms
 from packages.qbr_core.retrieval.evidence import EvidencePackBuilder, extract_relevant_quote
 
@@ -141,9 +142,9 @@ def test_language_fallback_expands_open_ended_operating_questions() -> None:
     plan = deterministic_plan("请问公司经营情况怎么样")
     query_corpus = " ".join(item.text for item in plan.retrieval_queries).casefold()
 
-    assert "revenue" in query_corpus
-    assert "profitability" in query_corpus
-    assert "capital" in query_corpus
+    assert "营收" in query_corpus
+    assert "盈利" in query_corpus
+    assert "资本" in query_corpus
     assert "运营" in query_corpus
 
 
@@ -154,7 +155,7 @@ def test_language_fallback_preserves_hard_constraints_without_classifying() -> N
     assert plan.operations == ("answer from evidence",)
 
 
-def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries() -> None:
+def test_llm_planner_only_adds_retrieval_queries_and_keeps_raw_question_contract() -> None:
     model = PlannerModel(
         json.dumps(
             {
@@ -187,14 +188,11 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
     plan = QueryPlannerAgent(model).plan("How did sales perform in Q2 2025?")
     corpus = " ".join(item.text for item in plan.retrieval_queries)
 
-    assert plan.planner == "llm_semantic"
-    assert plan.task_summary.startswith("Explain Q2 2025")
-    assert plan.operations == ("compare periods", "explain drivers")
-    assert plan.delivery_requirements == (
-        "state Q2 2025 sales performance",
-        "compare it with the prior period and target",
-        "explain documented drivers",
-    )
+    assert plan.planner == "llm_retrieval"
+    assert plan.canonical_question == "How did sales perform in Q2 2025?"
+    assert plan.task_summary == "How did sales perform in Q2 2025?"
+    assert plan.operations == ("answer from evidence",)
+    assert plan.delivery_requirements == ("How did sales perform in Q2 2025",)
     assert plan.execution_profile == "deep"
     assert plan.hard_constraints == ("2025", "Q2")
     assert plan.retrieval_queries[0].kind == "literal"
@@ -210,7 +208,7 @@ def test_llm_planner_owns_semantic_task_frame_and_keeps_language_guard_queries()
 
 
 def test_planner_prompt_uses_structured_summary_only_for_reference_resolution() -> None:
-    model = PlannerModel(json.dumps({"task_summary": "Resolve it from evidence."}))
+    model = PlannerModel(json.dumps({"retrieval_queries": []}))
 
     QueryPlannerAgent(model).plan(
         "它怎么样？",
@@ -222,7 +220,7 @@ def test_planner_prompt_uses_structured_summary_only_for_reference_resolution() 
     assert "reference resolution only, never business evidence" in prompt
 
 
-def test_llm_planner_accepts_multi_part_goal_without_collapsing_to_one_category() -> None:
+def test_llm_planner_cannot_turn_retrieval_hypotheses_into_answer_requirements() -> None:
     model = PlannerModel(
         json.dumps(
             {
@@ -239,14 +237,16 @@ def test_llm_planner_accepts_multi_part_goal_without_collapsing_to_one_category(
         )
     )
     plan = QueryPlannerAgent(model).plan("请总结公司的优势和潜在问题。")
-    assert plan.operations == ("synthesize strengths", "identify concerns", "state evidence boundaries")
+    assert plan.task_summary == "请总结公司的优势和潜在问题。"
+    assert plan.operations == ("answer from evidence",)
+    assert plan.delivery_requirements == ("请总结公司的优势和潜在问题",)
     assert not hasattr(plan, "active_intents")
 
 
-def test_planner_policy_requests_decision_criteria_without_domain_specific_thresholds() -> None:
-    assert "every relevant current measure" in PLANNER_SYSTEM_PROMPT
-    assert "threshold/target and comparison direction" in PLANNER_SYSTEM_PROMPT
-    assert "movement toward a boundary" in PLANNER_SYSTEM_PROMPT
+def test_planner_policy_keeps_evaluative_expansion_retrieval_only() -> None:
+    assert "raw user question is the only answer contract" in PLANNER_SYSTEM_PROMPT
+    assert "recall hypotheses only" in PLANNER_SYSTEM_PROMPT
+    assert "observed state and any stated criterion" in PLANNER_SYSTEM_PROMPT
     assert "Hong Kong" not in PLANNER_SYSTEM_PROMPT
     assert "45%" not in PLANNER_SYSTEM_PROMPT
 
@@ -257,7 +257,7 @@ def test_linguistic_fallback_adds_threshold_vocabulary_for_risk_concentration_qu
 
     assert "阈值" in query_corpus
     assert "集中度" in query_corpus
-    assert "当前" in query_corpus
+    assert "风险" in query_corpus
 
 
 def test_llm_planner_realigns_creation_drift_for_existing_chart_analysis() -> None:
@@ -282,7 +282,7 @@ def test_llm_planner_realigns_creation_drift_for_existing_chart_analysis() -> No
     query_corpus = " ".join(item.text for item in plan.retrieval_queries)
 
     assert plan.task_summary == plan.original_question
-    assert plan.operations == ("识别用户指定的现有证据", "比较结构、变化与异常", "形成有依据的推断并说明验证边界")
+    assert plan.operations == ("answer from evidence",)
     assert "设计 绘制规范" not in query_corpus
     assert "现有图表" in query_corpus
     assert plan.warnings == ()
@@ -394,7 +394,95 @@ def test_multiroute_retrieval_uses_paraphrase_bridges_without_intent_router(tmp_
     ids = {row["id"] for row in retrieval.items}
     assert {"chunk_risk", "chunk_margin"} <= ids
     assert "chunk_sources" not in ids
-    assert retrieval.diagnostics["task_summary"] == "what is the bad news in this ppt"
+    assert retrieval.diagnostics["original_question"] == "what is the bad news in this ppt"
+
+
+def test_ambiguous_company_issue_wording_is_not_rewritten_as_an_entity_list() -> None:
+    model = PlannerModel(
+        json.dumps(
+            {
+                "canonical_question": "列出存在风险的具体公司实体",
+                "task_summary": "识别所有被明确标记的问题公司",
+                "delivery_requirements": ["公司名称", "明确违规证据"],
+                "retrieval_queries": [{"text": "公司整体 风险 压力 趋势 关注点", "kind": "broad_recall"}],
+                "execution_profile": "focused",
+            }
+        )
+    )
+
+    questions = (
+        "当前文档里能找到哪些公司潜在的问题",
+        "当前文档里能找到哪些公司的潜在问题",
+        "当前文档里能找到公司哪些潜在的问题",
+        "当前文档里公司潜在的问题有哪些",
+        "当前文档里哪些公司存在潜在问题",
+    )
+    for question in questions:
+        plan = QueryPlannerAgent(model).plan(question)
+        query_corpus = " ".join(item.text for item in plan.retrieval_queries)
+
+        assert plan.canonical_question == question
+        assert plan.task_summary == question
+        assert plan.delivery_requirements == (question,)
+        assert "风险" in query_corpus
+
+
+def test_ambiguous_company_issue_wording_retrieves_issue_evidence_without_entity_names(tmp_path: Path) -> None:
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_pipeline_document(service)
+    question = "当前文档里能找到哪些公司潜在的问题"
+    plan = deterministic_plan(question, [document_id])
+    retrieval = service.retriever.search_plan(plan, "ws_demo", [document_id])
+
+    result = service.qa_service.answer_engine.answer_result(
+        question,
+        "ws_demo",
+        [document_id],
+        plan=plan,
+    )
+
+    retrieved_ids = {str(item.get("id") or "") for item in retrieval.items}
+    evidence_ids = {str(item.get("chunk_id") or "") for item in result.evidence}
+    assert {"chunk_risk", "chunk_margin"} <= retrieved_ids
+    assert "chunk_risk" in evidence_ids
+    assert "没有检索到足够证据" not in result.answer
+
+
+def test_answer_gap_triggers_at_most_one_followup_retrieval_and_regeneration(tmp_path: Path) -> None:
+    class GapAwareAgent:
+        def __init__(self) -> None:
+            self.answer_calls = 0
+            self.assessment_calls = 0
+
+        def answer(self, **kwargs: object) -> LLMAnswer:
+            self.answer_calls += 1
+            if self.answer_calls == 1:
+                return LLMAnswer("当前证据不足，无法完整回答。", model={"status": "completed"})
+            return LLMAnswer("利润率低于目标，需要管理层采取行动。[1]", model={"status": "completed"})
+
+        def assess_adequacy(self, **kwargs: object) -> AnswerAdequacy:
+            self.assessment_calls += 1
+            if self.assessment_calls == 1:
+                return AnswerAdequacy(False, "below target management action", {"complete": False})
+            return AnswerAdequacy(True, diagnostics={"complete": True})
+
+    service = QBRService(Settings(tmp_path, tmp_path / "app.sqlite3", tmp_path / "objects"))
+    document_id = _seed_pipeline_document(service)
+    agent = GapAwareAgent()
+    service.qa_service.run_executor._qa_agent = agent  # type: ignore[assignment]
+    service.qa_service.run_executor._deep_qa_agent = agent  # type: ignore[assignment]
+    conversation = service.create_conversation("ws_demo", "user_demo", [document_id])
+
+    queued = service.ask(conversation["id"], "请说明当前情况", "ws_demo", "user_demo")
+    service.process_next_run("answer-gap-test")
+    result = service.get_conversation(conversation["id"], "ws_demo", "user_demo")
+    message = next(item for item in result["messages"] if item["id"] == queued["assistant_message_id"])
+
+    assert agent.answer_calls == 2
+    assert agent.assessment_calls == 2
+    assert "利润率低于目标" in message["content"]
+    assert message["metadata"]["verification"]["adequacy"]["retried"] is True
+    assert any(query["kind"] == "answer_gap" for query in message["metadata"]["query_plan"]["retrieval_queries"])
 
 
 def test_end_to_end_metadata_exposes_task_frame_not_intent_taxonomy(tmp_path: Path) -> None:

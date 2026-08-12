@@ -323,8 +323,7 @@ def build_evidence_contract(
 
     del tool_evidence  # Tool evidence is evaluated against the same user contract.
     question = str(getattr(task, "original_question", task)).strip()
-    planned = tuple(str(item).strip() for item in getattr(task, "delivery_requirements", ()) if str(item).strip())
-    requirements = planned or tuple(
+    requirements = tuple(
         item.strip(" ,，")
         for item in re.split(r"[?？!！;；。]+", question)
         if item.strip(" ,，")
@@ -336,9 +335,7 @@ def build_evidence_contract(
     ) or (question,)
     visual_task = bool(_VISUAL_REFERENCE_PATTERN.search(question) and _contains_any(question, _ANALYSIS_MARKERS))
     facets: list[EvidenceFacet] = []
-    evidence_hints = tuple(str(item).strip() for item in getattr(task, "evidence_requirements", ()) if str(item).strip())
-    aligned_hints = evidence_hints if len(evidence_hints) == len(requirements) else ("",) * len(requirements)
-    for requirement_index, requirement in enumerate(requirements):
+    for requirement in requirements:
         matching_clause = _closest_clause(requirement, question_clauses)
         context = " ".join(dict.fromkeys((requirement, matching_clause)))
         validators = _validators_for(context)
@@ -346,8 +343,7 @@ def build_evidence_contract(
             validators = (*validators, "visual_analysis")
         constraints = tuple(dict.fromkeys(match.group(0) for match in _PERIOD_PATTERN.finditer(context)))
         minimum = _minimum_evidence(task, validators, len(requirements))
-        matching_text = " ".join((requirement, aligned_hints[requirement_index])).strip()
-        match_terms = tuple(sorted(_semantic_terms(matching_text) - _MATCH_STOPWORDS))
+        match_terms = tuple(sorted(_semantic_terms(requirement) - _MATCH_STOPWORDS))
         semantic_match_required = len(requirements) > 1 and set(validators) == {"direct_support"}
         quantitative = any(item in validators for item in ("numeric", "decision_criterion"))
         subjects = _metric_subjects(matching_clause) if quantitative else []

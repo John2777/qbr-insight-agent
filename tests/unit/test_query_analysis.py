@@ -142,24 +142,22 @@ def test_one_delivery_requirement_composes_checks_instead_of_choosing_an_intent_
     assert "direct_answer" not in contract[0].facet_id
 
 
-def test_delivery_requirements_map_evidence_independently_and_keep_gaps_local() -> None:
+def test_raw_question_clauses_map_evidence_independently_and_keep_gaps_local() -> None:
     plan = replace(
-        deterministic_plan("综合说明收入改善和资本压力"),
-        planner="llm_semantic",
+        deterministic_plan("说明收入改善；说明资本压力"),
+        planner="llm_retrieval",
         execution_profile="deep",
-        delivery_requirements=("说明收入改善", "说明资本压力"),
-        evidence_requirements=("revenue evidence", "capital evidence"),
     )
     complete = EvidencePackBuilder().build(
         plan,
         [
-            _row("revenue", "Revenue increased to 120 and improved year over year."),
-            _row("capital", "Capital pressure increased as the buffer declined.", slide_no=2),
+            _row("revenue", "收入改善至120，同比增长。"),
+            _row("capital", "资本压力上升，缓冲下降。", slide_no=2),
         ],
     )
     partial = EvidencePackBuilder().build(
         plan,
-        [_row("revenue", "Revenue increased to 120 and improved year over year.")],
+        [_row("revenue", "收入改善至120，同比增长。")],
     )
 
     assert [item.status for item in complete.coverage.facets] == ["supported", "supported"]
