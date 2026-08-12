@@ -45,6 +45,7 @@ class Settings:
     llm_model: str = ""
     planner_model: str = ""
     deep_llm_model: str = ""
+    answer_polishing_enabled: bool = True
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2
     llm_max_tokens: int = 1200
@@ -137,6 +138,7 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             planner_model=os.getenv("PLANNER_MODEL", "").strip(),
             deep_llm_model=os.getenv("DEEP_LLM_MODEL", "").strip(),
+            answer_polishing_enabled=_bool_env("ANSWER_POLISHING_ENABLED", True),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
             llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "2")),
             llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1200")),

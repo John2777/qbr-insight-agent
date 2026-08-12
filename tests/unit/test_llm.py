@@ -8,25 +8,36 @@ from pytest import LogCaptureFixture
 
 from packages.qbr_core import QBRService
 from packages.qbr_core.foundation.config import Settings
-from packages.qbr_core.providers.llm import EvidenceQAAgent, build_chat_model
+from packages.qbr_core.providers.llm import POLISHING_SYSTEM_PROMPT, EvidenceQAAgent, build_chat_model
 
 
 class FakeModel:
-    def __init__(self, content: str | Exception, *, finish_reason: str | None = None, output_tokens: int = 20) -> None:
-        self.content = content
+    def __init__(
+        self,
+        content: str | Exception | list[str | Exception],
+        *,
+        finish_reason: str | None = None,
+        output_tokens: int = 20,
+    ) -> None:
+        self.contents = content if isinstance(content, list) else [content]
         self.finish_reason = finish_reason
         self.output_tokens = output_tokens
         self.messages: object | None = None
+        self.message_history: list[object] = []
+        self.invoke_count = 0
 
     def invoke(self, messages: object) -> AIMessage:
         self.messages = messages
-        if isinstance(self.content, Exception):
-            raise self.content
+        self.message_history.append(messages)
+        content = self.contents[min(self.invoke_count, len(self.contents) - 1)]
+        self.invoke_count += 1
+        if isinstance(content, Exception):
+            raise content
         response_metadata = {"model_name": "deepseek-v4-flash"}
         if self.finish_reason is not None:
             response_metadata["finish_reason"] = self.finish_reason
         return AIMessage(
-            content=self.content,
+            content=content,
             usage_metadata={
                 "input_tokens": 100,
                 "output_tokens": self.output_tokens,
@@ -162,7 +173,7 @@ def test_generation_prompt_uses_task_frame_without_fixed_summary_template(tmp_pa
     items = [{**evidence()[0], "quote": "Growth continued while concentration remained elevated."}]
     agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
     result = answer(agent, "请概括优势和潜在问题。", "Growth continued; concentration elevated [1]", items)
-    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.messages or [])
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[0])
     assert result.answer == "增长延续，同时集中度偏高。[1]"
     assert "语义任务框架" in prompt
     assert "固定使用“总体判断" not in prompt
@@ -182,10 +193,100 @@ def test_generation_prompt_marks_structured_summary_as_non_evidence(tmp_path: Pa
         task_frame=task_frame("它怎么样？"),
     )
 
-    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.messages or [])
+    prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[0])
     assert result.answer == "ACME 的收入需要依据文档证据判断。[1]"
     assert '"entities":["ACME"]' in prompt
     assert "不能作为业务事实证据" in prompt
+
+
+def test_polishing_agent_restructures_by_question_without_changing_facts(tmp_path: Path) -> None:
+    draft = "甲的规模为100，乙为80。[1] 甲的质量为90%，乙为95%。[1]"
+    polished = (
+        "分维度比较如下：\n\n"
+        "- **规模**：甲为100，高于乙的80。[1]\n"
+        "- **质量**：乙为95%，高于甲的90%。[1]"
+    )
+    model = FakeModel([draft, polished])
+    agent = EvidenceQAAgent(settings_at(tmp_path), model=model)
+
+    result = answer(
+        agent,
+        "从规模和质量两个维度比较甲和乙。",
+        "甲的规模为100，乙为80；甲的质量为90%，乙为95%。[1]",
+        [{**evidence()[0], "quote": "甲的规模为100，乙为80；甲的质量为90%，乙为95%。"}],
+    )
+
+    assert result.answer == polished
+    assert result.warnings == []
+    assert model.invoke_count == 2
+    assert result.model["polishing"]["status"] == "completed"
+    polish_prompt = "\n".join(str(getattr(item, "content", "")) for item in model.message_history[1])
+    assert "用户问题" in polish_prompt
+    assert "语义任务框架" in polish_prompt
+    assert "待润色草稿" in polish_prompt
+
+
+def test_polishing_prompt_is_general_and_rejects_unscoped_overall_rankings() -> None:
+    assert "问题识别真正的交付要求" in POLISHING_SYSTEM_PROMPT
+    assert "固定总结模板" in POLISHING_SYSTEM_PROMPT
+    assert "不得制造综合得分、总排名" in POLISHING_SYSTEM_PROMPT
+    assert "香港" not in POLISHING_SYSTEM_PROMPT
+    assert "新加坡" not in POLISHING_SYSTEM_PROMPT
+
+
+def test_polishing_failure_keeps_original_draft_and_still_verifies(
+    tmp_path: Path, caplog: LogCaptureFixture
+) -> None:
+    draft = "Q2 Revenue 为 20。[1]"
+    model = FakeModel([draft, RuntimeError("polisher unavailable")])
+    result = answer(EvidenceQAAgent(settings_at(tmp_path), model=model), "Q2 Revenue 是多少？", "Revenue: Q2=20 [1]")
+
+    assert result.answer == draft
+    assert result.warnings == ["ANSWER_POLISHING_PROVIDER_ERROR"]
+    assert result.diagnostics["disposition"] == "accepted"
+    assert result.model["polishing"]["status"] == "fallback_to_draft"
+    assert "polisher unavailable" not in str(result.model)
+    assert '"component":"answer_polishing"' in caplog.text
+
+
+def test_polishing_fact_contract_guard_rejects_dropped_numbers_or_citations(tmp_path: Path) -> None:
+    draft = "甲的规模为100。[1] 乙的规模为80。[1]"
+    incomplete_polish = "- **甲**：规模为100。[1]"
+    model = FakeModel([draft, incomplete_polish])
+
+    result = answer(
+        EvidenceQAAgent(settings_at(tmp_path), model=model),
+        "比较甲和乙的规模。",
+        "甲的规模为100；乙的规模为80。[1]",
+        [{**evidence()[0], "quote": "甲的规模为100；乙的规模为80。"}],
+    )
+
+    assert result.answer == draft
+    assert result.warnings == ["ANSWER_POLISHING_FACT_CONTRACT_FAILED"]
+    assert result.model["polishing"]["status"] == "fallback_to_draft"
+    assert result.model["polishing"]["fact_contract_preserved"] is False
+
+
+def test_polishing_can_be_disabled_without_changing_answer_generation(tmp_path: Path) -> None:
+    settings = settings_at(tmp_path)
+    settings = Settings(
+        settings.data_dir,
+        settings.database_path,
+        settings.object_dir,
+        llm_enabled=True,
+        llm_provider=settings.llm_provider,
+        llm_base_url=settings.llm_base_url,
+        llm_api_key="test-key",
+        llm_model=settings.llm_model,
+        answer_polishing_enabled=False,
+    )
+    model = FakeModel("Q2 Revenue 为 20。[1]")
+
+    result = answer(EvidenceQAAgent(settings, model=model), "Q2 Revenue 是多少？", "Revenue: Q2=20 [1]")
+
+    assert result.answer == "Q2 Revenue 为 20。[1]"
+    assert model.invoke_count == 1
+    assert "polishing" not in result.model
 
 
 def test_deepseek_answer_client_explicitly_disables_thinking(tmp_path: Path) -> None:

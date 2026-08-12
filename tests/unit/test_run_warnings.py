@@ -10,6 +10,7 @@ def test_warning_catalog_separates_data_caveats_from_provider_fallbacks() -> Non
     synthetic = describe_warning("SYNTHETIC_DATA_SIGNAL")
     planner = describe_warning("QUERY_PLANNER_PROVIDER_ERROR")
     truncated = describe_warning("LLM_OUTPUT_TRUNCATED")
+    polishing = describe_warning("ANSWER_POLISHING_FACT_CONTRACT_FAILED")
 
     assert synthetic.severity == "info"
     assert synthetic.category == "data_caveat"
@@ -17,6 +18,8 @@ def test_warning_catalog_separates_data_caveats_from_provider_fallbacks() -> Non
     assert planner.category == "provider_fallback"
     assert truncated.severity == "degraded"
     assert truncated.category == "answer_fallback"
+    assert polishing.severity == "degraded"
+    assert polishing.label == "Answer polishing rejected"
     assert has_degraded_warning([synthetic.code, planner.code])
 
 

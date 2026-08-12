@@ -83,6 +83,29 @@ _WARNING_CATALOG: dict[str, WarningDescriptor] = {
         label="Model generation degraded",
         description="The answer-generation model call failed, so the system returned a verified deterministic evidence answer.",
     ),
+    "ANSWER_POLISHING_PROVIDER_ERROR": WarningDescriptor(
+        code="ANSWER_POLISHING_PROVIDER_ERROR",
+        severity="degraded",
+        category="provider_fallback",
+        label="Answer polishing skipped",
+        description="The polishing model call failed, so the system verified and returned the original answer draft.",
+    ),
+    "ANSWER_POLISHING_OUTPUT_INVALID": WarningDescriptor(
+        code="ANSWER_POLISHING_OUTPUT_INVALID",
+        severity="degraded",
+        category="answer_fallback",
+        label="Answer polishing skipped",
+        description="The polished response was incomplete or invalid, so the system verified and returned the original answer draft.",
+    ),
+    "ANSWER_POLISHING_FACT_CONTRACT_FAILED": WarningDescriptor(
+        code="ANSWER_POLISHING_FACT_CONTRACT_FAILED",
+        severity="degraded",
+        category="answer_fallback",
+        label="Answer polishing rejected",
+        description=(
+            "The polished response changed numeric facts or citations, so the system verified and returned the original answer draft."
+        ),
+    ),
     "LLM_EMPTY_OR_OVERSIZED_RESPONSE": WarningDescriptor(
         code="LLM_EMPTY_OR_OVERSIZED_RESPONSE",
         severity="degraded",

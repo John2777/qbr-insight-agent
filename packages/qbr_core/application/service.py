@@ -154,6 +154,7 @@ class QBRService:
                 "model": self.settings.llm_model if self.settings.llm_enabled else None,
                 "planner_model": (self.settings.planner_model or self.settings.llm_model) if self.settings.llm_enabled else None,
                 "deep_model": (self.settings.deep_llm_model or self.settings.llm_model) if self.settings.llm_enabled else None,
+                "answer_polishing_enabled": self.settings.answer_polishing_enabled,
             },
             "retrieval": {
                 "strategy": self.settings.retrieval_strategy,

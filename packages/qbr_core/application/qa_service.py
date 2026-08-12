@@ -435,7 +435,7 @@ class QAApplicationService:
             message_metadata = {
                 "show_visuals": plan.needs_visuals,
                 "knowledge_source": "document_evidence",
-                "pipeline_version": "semantic-task-frame-v2-typed-coverage",
+                "pipeline_version": "semantic-task-frame-v3-polished",
                 "query_plan": plan.to_dict(),
                 "answer_routing": answer_result.diagnostics.get("answer_routing", {}),
                 "retrieval": answer_result.diagnostics.get("retrieval", {}),

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
@@ -10,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
-from packages.qbr_core.analysis.verification import ClaimEvidenceVerifier
+from packages.qbr_core.analysis.verification import ClaimEvidenceVerifier, numeric_facts
 from packages.qbr_core.foundation.config import Settings
 from packages.qbr_core.foundation.observability import log_provider_failure
 
@@ -40,6 +42,20 @@ SYSTEM_PROMPT = """你是一个受控的企业文档证据问答助手。
 13. 当表格与图表中的同名项数值不同时，先比较两边的成员集合，并尝试用证据中的明细值做可复核的包含关系加总。
     只有当成员差集与算术等式都成立时，才可判定为聚合口径变化；否则应如实说明无法完成勾稽，不得猜测汇率、调整项或制图错误。
 """
+
+POLISHING_SYSTEM_PROMPT = """你是一个受控的答案编辑智能体。你的唯一任务是改善给定草稿的结构与可读性，不负责补充事实或重新分析证据。
+
+编辑规则：
+1. 先从用户问题识别真正的交付要求，例如比较维度、分析对象、步骤、决策点、时间顺序或输出粒度；围绕这些要求组织答案。
+2. 结构必须随问题变化，不得套用固定章节、固定表格或固定总结模板。简单问题保持简洁；复杂问题使用平行、易扫描的层次，避免标题与内容错位。
+3. 优先给出直接结论，再提供必要依据。合并重复内容，让同一层级的段落使用一致的组织方式；表格仅在确实提高可读性时使用。
+4. 多指标或多维度问题要分别说明各指标或维度的结论与权衡。若没有共同口径、权重或证据，不得制造综合得分、总排名或笼统的“最佳”。
+5. 必须完整保留草稿中的事实性主张、数字、单位、时间、比较关系、限定语、证据边界和引用编号，不得新增、删除、改写或合并成含义不同的结论。
+6. 不得加入草稿中没有的原因、定义、建议、背景知识、评价性标签或引用；不得用常识补齐缺失信息。
+7. 引用应紧跟其支持的主张。不得创建新引用编号，也不得把一个引用移动到它不支持的主张之后。
+8. 使用与用户问题相同的主要语言。只输出润色后的完整答案，不解释编辑过程，不输出前言、批注或检查清单。
+
+如果任何改写可能改变事实含义，保留原表述，仅调整周围结构。"""
 
 
 class QAState(TypedDict, total=False):
@@ -89,6 +105,29 @@ def _thinking_body(provider: str, enabled: bool) -> dict[str, Any]:
     return {}
 
 
+def _combined_model_metadata(
+    generation: dict[str, Any],
+    polishing: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach role-level metadata and aggregate observable call costs."""
+    combined = {**generation, "polishing": polishing}
+    for key in ("latency_ms", "input_tokens", "output_tokens", "total_tokens"):
+        values = [item.get(key) for item in (generation, polishing)]
+        numeric = [value for value in values if isinstance(value, int | float)]
+        if numeric:
+            combined[key] = sum(numeric)
+    return combined
+
+
+def _fact_markers_preserved(draft: str, polished: str) -> bool:
+    """Check that polishing neither adds nor drops numeric facts or citations."""
+    draft_numbers = Counter((fact.value, fact.unit) for fact in numeric_facts(draft))
+    polished_numbers = Counter((fact.value, fact.unit) for fact in numeric_facts(polished))
+    draft_citations = Counter(re.findall(r"\[(\d+)\]", draft))
+    polished_citations = Counter(re.findall(r"\[(\d+)\]", polished))
+    return draft_numbers == polished_numbers and draft_citations == polished_citations
+
+
 def build_chat_model(
     settings: Settings,
     model_name: str,
@@ -119,6 +158,94 @@ def build_chat_model(
     return ChatOpenAI(**kwargs)
 
 
+class AnswerPolishingAgent:
+    """Restructure an answer draft without changing its factual contract."""
+
+    def __init__(self, settings: Settings, model: Any, *, model_name: str) -> None:
+        """Initialize the polishing role with the shared answer model client."""
+        self.settings = settings
+        self.model = model
+        self.model_name = model_name
+
+    def polish(
+        self,
+        *,
+        question: str,
+        task_frame: dict[str, Any],
+        draft: str,
+        run_id: str | None = None,
+    ) -> tuple[str, list[str], dict[str, Any]]:
+        """Return a polished draft, falling back to the original on any failure."""
+        prompt = (
+            f"用户问题：\n{question}\n\n"
+            f"语义任务框架（只用于理解交付要求，不是回答模板）：\n{task_frame}\n\n"
+            f"待润色草稿：\n{draft}\n\n"
+            "请在严格保持事实合同不变的前提下，输出结构更清晰、层次更平行、便于快速阅读的完整答案。"
+        )
+        started = time.perf_counter()
+        try:
+            message = self.model.invoke(
+                [SystemMessage(content=POLISHING_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+            )
+        except Exception as exc:
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            diagnostics = log_provider_failure(
+                logger,
+                component="answer_polishing",
+                exc=exc,
+                provider=self.settings.llm_provider,
+                model=self.model_name,
+                run_id=run_id,
+                latency_ms=latency_ms,
+            )
+            return draft, ["ANSWER_POLISHING_PROVIDER_ERROR"], {
+                "provider": self.settings.llm_provider,
+                "model": self.model_name,
+                "status": "fallback_to_draft",
+                "thinking": "disabled",
+                **diagnostics,
+                "latency_ms": latency_ms,
+            }
+
+        usage = getattr(message, "usage_metadata", None) or {}
+        response_metadata = getattr(message, "response_metadata", None) or {}
+        finish_reason = str(response_metadata.get("finish_reason") or "").casefold()
+        output_tokens = usage.get("output_tokens")
+        token_limit_reached = (
+            not finish_reason
+            and isinstance(output_tokens, int)
+            and output_tokens >= self.settings.llm_max_tokens
+        )
+        polished = _message_text(message)
+        invalid = (
+            finish_reason in TRUNCATED_FINISH_REASONS
+            or token_limit_reached
+            or not polished
+            or len(polished) > 5000
+        )
+        metadata = {
+            "provider": self.settings.llm_provider,
+            "model": response_metadata.get("model_name") or self.model_name,
+            "status": "fallback_to_draft" if invalid else "completed",
+            "thinking": "disabled",
+            "finish_reason": finish_reason or None,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": output_tokens,
+            "total_tokens": usage.get("total_tokens"),
+        }
+        if invalid:
+            return draft, ["ANSWER_POLISHING_OUTPUT_INVALID"], metadata
+        if not _fact_markers_preserved(draft, polished):
+            return draft, ["ANSWER_POLISHING_FACT_CONTRACT_FAILED"], {
+                **metadata,
+                "status": "fallback_to_draft",
+                "fact_contract_preserved": False,
+            }
+        metadata["fact_contract_preserved"] = True
+        return polished, [], metadata
+
+
 class EvidenceQAAgent:
     """Generate one grounded answer from a semantic task frame."""
 
@@ -129,11 +256,14 @@ class EvidenceQAAgent:
         self.settings = settings
         self.model_name = model_name or settings.llm_model
         self.model = model or build_chat_model(settings, self.model_name, thinking_enabled=False)
+        self.polisher = AnswerPolishingAgent(settings, self.model, model_name=self.model_name)
         graph = StateGraph(QAState)
         graph.add_node("generate", self._generate)
+        graph.add_node("polish", self._polish)
         graph.add_node("verify", self._verify)
         graph.add_edge(START, "generate")
-        graph.add_edge("generate", "verify")
+        graph.add_edge("generate", "polish")
+        graph.add_edge("polish", "verify")
         graph.add_edge("verify", END)
         self.graph = graph.compile()
         self.verifier = ClaimEvidenceVerifier()
@@ -245,6 +375,30 @@ class EvidenceQAAgent:
                 "output_tokens": output_tokens,
                 "total_tokens": usage.get("total_tokens"),
             },
+        }
+
+    def _polish(self, state: QAState) -> dict[str, Any]:
+        """Improve answer structure while preserving the generated factual draft."""
+        draft = state.get("candidate_answer", "").strip()
+        warnings = list(state.get("warnings", []))
+        if (
+            not self.settings.answer_polishing_enabled
+            or not draft
+            or "LLM_OUTPUT_TRUNCATED" in warnings
+            or "LLM_PROVIDER_ERROR" in warnings
+        ):
+            return {}
+
+        polished, polish_warnings, polish_model = self.polisher.polish(
+            question=state["question"],
+            task_frame=state.get("task_frame", {}),
+            draft=draft,
+            run_id=state.get("run_id") or None,
+        )
+        return {
+            "candidate_answer": polished,
+            "warnings": [*warnings, *polish_warnings],
+            "model": _combined_model_metadata(state.get("model", {}), polish_model),
         }
 
     def _verify(self, state: QAState) -> dict[str, Any]:
