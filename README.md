@@ -209,7 +209,7 @@ OpenAPI UI: `/api/docs`; schema: `/api/openapi.json`.
 | Conversations and answers | Conversation CRUD, message submission, run status, and `GET /api/v1/runs/{run_id}/events` |
 | Reviews and analytics | Review task list/claim/resolve and `GET /api/v1/analytics/summary` |
 
-See [Backend and API Design](./docs/06-backend-api.md) for full request and response contracts, state transitions, and error formats.
+See [Modules, APIs, and Data Design](./architecture-design-docs/en/06-engineering-api-data.md) for the interaction model, core endpoints, domain model, and consistency strategy.
 
 ## Repository Layout
 
@@ -296,17 +296,18 @@ Dataset documentation is available under [`benchmarks/`](./benchmarks/). Evaluat
 - LibreOffice rendering can differ from Microsoft PowerPoint in fonts and layout. The deployment image pins a LibreOffice, Poppler, and Noto CJK font environment to improve reproducibility.
 - Chat, Embedding, Rerank, and Vision failures preserve an explicit degraded state. The system never presents a missing capability as a successful result.
 
-See [Security and Governance](./docs/08-security-governance.md) for the full threat model and [Implementation Status](./docs/13-implementation-status.md) for implemented capabilities and intentionally deferred work.
+See [Security, Operations, and Evolution](./architecture-design-docs/en/07-security-operations-evolution.md) for trust boundaries, authentication, data lifecycle, deployment, and the evolution path. Current engineering validation is recorded in the [System Test Report](./architecture-design-docs/en/08-system-test-report.md).
 
 ## Documentation
 
-- [Detailed Design Index](./docs/README.md)
-- [System Architecture](./docs/02-system-architecture.md)
-- [Multimodal PPT Parsing Skill](./docs/03-ppt-parsing-skill.md)
-- [SQLite Data and Indexing](./docs/04-data-and-sqlite.md)
-- [RAG and Agent Design](./docs/05-rag-and-agent.md)
-- [Backend API](./docs/06-backend-api.md)
-- [Frontend and UX](./docs/07-frontend-ux.md)
-- [Testing and Evaluation](./docs/10-testing-evaluation.md)
-- [ADRs, Risks, and Open Questions](./docs/12-decisions-risks.md)
+- [Architecture Design Index](./architecture-design-docs/en/README.md)
+- [Product and Design Principles](./architecture-design-docs/en/01-product-and-principles.md)
+- [System Architecture](./architecture-design-docs/en/02-system-architecture.md)
+- [PPT Ingestion and Knowledge Modeling](./architecture-design-docs/en/03-ingestion-and-knowledge.md)
+- [AI Agent Workflow](./architecture-design-docs/en/04-agent-workflow.md)
+- [Context and RAG](./architecture-design-docs/en/05-context-and-rag.md)
+- [Modules, APIs, and Data Design](./architecture-design-docs/en/06-engineering-api-data.md)
+- [Security, Operations, and Evolution](./architecture-design-docs/en/07-security-operations-evolution.md)
+- [System Test Report](./architecture-design-docs/en/08-system-test-report.md)
+- [AI Evaluation Report](./architecture-design-docs/en/09-ai-evaluation-report.md)
 - [Cloud Deployment Runbook](./cloud-deployment-runbook/README.md)
